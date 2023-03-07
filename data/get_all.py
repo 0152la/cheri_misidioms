@@ -328,14 +328,6 @@ def do_attacks(alloca, tests):
     if alloca.no_attacks:
         return {}, False
     results = {}
-    if args.target_machine:
-        assert('@' in args.target_machine)
-        conn_user, conn_host = args.target_machine.split('@')
-        conn_port = None
-    else:
-        conn_user = "root"
-        conn_host = "localhost"
-        conn_port = config['cheri_qemu_port']
     for test in tests:
         cmd = os.path.join(work_dir_remote, os.path.basename(test))
         print(f"- Running test {cmd}")
@@ -344,8 +336,7 @@ def do_attacks(alloca, tests):
         remote_env = { 'LD_PRELOAD' : alloca.remote_lib_path }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
-        with Connection(host=conn_host, user=conn_user, port=conn_port) as test_conn:
-            test_res = test_conn.run(cmd, env = remote_env, warn = True)
+        test_res = exec_env.run_cmd(cmd, env = remote_env, check = False)
         runtime = time.perf_counter_ns() - start_time
         if "validate" in test:
             validated = test_res.exited == 0
@@ -558,6 +549,7 @@ if os.path.exists(symlink_name):
 os.symlink(work_dir_local, symlink_name)
 
 # Build and run new CHERI QEMU instance
+exec_env = None
 if args.target_machine:
     exec_env = ExecEnvironment(args.target_machine)
 else:
