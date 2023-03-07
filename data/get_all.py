@@ -47,6 +47,8 @@ arg_parser.add_argument("--log-file", type=str, action='store',
 arg_parser.add_argument("--no-build-cheri", action="store_true",
         help="""Whether to build CheriBSD and the QEMU image from scratch. Only
         set if `local-dir` is set with a pre-existing build within.""")
+arg_parse.add_argument("--no-wait-qemu", action="store_true",
+        help="If set, assumes the QEMU instance is running, and skip waiting").
 arg_parser.add_argument("--parse-data-only", action='store', default="",
         type=str, metavar="path",
         help="Parse given results file to generate LaTeX tables.")
@@ -166,26 +168,64 @@ def log_message(msg):
 # Objects
 ################################################################################
 
-class InstallType(enum.Enum):
+class InstallMode(enum.Enum):
     REPO = enum.auto()
     PKG = enum.auto()
     CHERIBUILD = enum.auto()
 
+    def parse_version(self, install_data):
+        if self == InstallMode.PKG:
+            return install_data['version']
+        return install_data['commit']
+
     @classmethod
     def parse_mode(cls, mode):
         if mode == "repo":
-            return InstallType.REPO
+            return InstallMode.REPO
         elif mode == "pkg64c":
-            return InstallType.PKG
+            return InstallMode.PKG
         elif mode == "cheribuild":
-            return InstallType.CHERIBUILD
+            return InstallMode.CHERIBUILD
         else:
             print(f"Wrong mode parsed: {mode}")
             assert(False)
 
 class Allocator:
-    def __init__(self, json_data):
-        self.install_mode = InstallType.parse_mode(json_data['install']['mode'])
+    def __init__(self, folder, json_data):
+        self.name = os.path.basename(folder.removesuffix('/')).replace('_', '-')
+        self.info_folder = folder
+        self.install_mode = InstallMode.parse_mode(json_data['install']['mode'])
+        self.install_target = json_data['install']['target']
+        if self.install_mode == InstallMode.PKG:
+            # self.source_path =
+            self.remote_lib_path = json_data['install']['lib_file']
+            self.cheribsd_ports_path = json_data['cheribsd_ports_path']
+            self.cheribsd_ports_commit = json_data['commit']
+        elif self.install_mode == InstallMode.CHERIBUILD:
+            self.source_path = parse_path(json_data['install']['source'])
+            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(alloca.lib_file))
+        elif self.install_mode == InstallMode.REPO:
+            self.source_path = os.path.join(base_cwd, self.name)
+            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(alloca.lib_file))
+        self.lib_file = parse_path(json_data['install']['lib_file'])
+        if not os.path.isabs(self.lib_file):
+            self.lib_file = os.path.join(self.source_path, self.lib_file)
+        self.version = self.install_mode.parse_version(json_data['install'])
+        self.no_attacks = False if not "no_attacks" in json_data else json_data['no_attacks']
+        self.raw_data = json_data
+
+    def get_build_file_path(self):
+        return os.path.join(self.info_folder, self.raw_data['install']['build_file'])
+
+class ExecEnvironment:
+    def __init__(self, addr):
+        assert('@' in addr)
+        self.user, self.ip = addr.split('@')
+        if ':' in self.ip:
+            self.ip, self.port = self.ip.split(':')
+            self.port = int(self.port)
+        else:
+            self.port = 22
 
 ################################################################################
 # Preparation
@@ -243,43 +283,40 @@ def prepare_cheribsd_ports():
 # Application
 ################################################################################
 
-def do_install(info, compile_env):
-    if info['mode'] == 'cheribuild':
+def do_source(alloca):
+    if alloca.install_mode == InstallMode.CHERIBUILD:
         os.chdir(get_config('cheribuild_folder'))
-        subprocess.run(make_cheribuild_cmd(info['target'], "--configure-only"), stdout = None)
-        repo_path = parse_path(info['source'])
-        assert('commit' in info)
-        repo = git.Repo(path = subprocess.check_output(shlex.split("git rev-parse --show-toplevel"), cwd = repo_path, encoding = 'UTF-8').strip())
-        repo.git.fetch("origin", info['commit'])
-        repo.git.checkout(info['commit'])
-        subprocess.run(make_cheribuild_cmd(info['target'], "-c"), stdout = None)
-        if 'build_file' in info and info['build_file']:
-            subprocess.run(os.path.join(base_cwd, alloc_folder, info['build_file']), env = compile_env, cwd = repo_path)
+        subprocess.run(make_cheribuild_cmd(alloca.target, "--configure-only"), stdout = None)
+        repo = git.Repo(path = subprocess.check_output(shlex.split("git rev-parse --show-toplevel"), cwd = alloca.source_path, encoding = 'UTF-8').strip())
+        repo.git.fetch("origin", alloca.version)
+        repo.git.checkout(alloca.version)
         os.chdir(base_cwd)
-        if 'lib_file' in info and info['lib_file'] and not 'no_copy' in info:
-            subprocess.run(make_scp_cmd(parse_path(info['lib_file']), work_dir_remote), check = True)
-    elif info['mode'] == 'repo':
-        alloc_path = os.path.join(work_dir_local, alloc_data['name'])
-        if not os.path.exists(alloc_path):
-            repo = git.Repo.clone_from(url = info['repo'], to_path = alloc_path)
+    elif alloca.install_type == InstallMode.REPO:
+        if not os.path.exists(alloca.source_path):
+            repo = git.Repo.clone_from(url = alloca.target, to_path = alloca.source_path)
         else:
-            repo = git.Repo(alloc_path)
-        repo.git.checkout(info['commit'])
-        if 'build_file' in info and info['build_file']:
-            os.chdir(alloc_path)
-            subprocess.run([os.path.join(base_cwd, alloc_folder, info['build_file']), work_dir_local], env = compile_env)
-            os.chdir(base_cwd)
-        if 'lib_file' in info and info['lib_file'] and not 'no_copy' in info:
-            subprocess.run(make_scp_cmd(os.path.join(alloc_path, info['lib_file']), work_dir_remote), check = True)
-    elif info['mode'] == 'pkg64c':
+            repo = git.Repo(alloca.source_path)
+        repo.git.fetch("origin", alloca.version)
+        repo.git.checkout(alloca.version)
+    elif alloca.install_mode == InstallMode.PKG:
+        # TODO
+        pass
+
+def do_install(alloca, compile_env):
+    if alloca.install_mode == InstallMode.CHERIBUILD:
+        os.chdir(get_config('cheribuild_folder'))
+        subprocess.run(make_cheribuild_cmd(alloca.target, "-c"), stdout = None)
+        os.chdir(base_cwd)
+        subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
+    elif alloca.install_type == InstallMode.REPO:
+        subprocess.run([alloca.get_build_file_path(), work_dir_local], env = compile_env, cwd = alloca.source_path)
+        subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
+    elif alloca.install_mode == InstallMode.PKG:
         if args.target_machine:
-            check_cmd = subprocess.run(make_ssh_cmd(f"pkg64c info {info['target']}"))
+            check_cmd = subprocess.run(make_ssh_cmd(f"pkg64c info {alloca.target}"))
             return check_cmd.returncode == 0
         else:
-            subprocess.run(make_install_alloc_cmd(info['target'], info['version']))
-    else:
-        return False
-    return True
+            subprocess.run(make_install_alloc_cmd(alloca.target, alloca.version))
 
 def do_line_count(source_path):
     cloc_data = json.loads(subprocess.check_output(make_cloc_cmd(source_path), encoding = 'UTF-8'))
@@ -289,7 +326,9 @@ def do_cheri_line_count(alloc_path):
     data = subprocess.check_output([get_config('data_get_script_path'), "cheri-line-count", alloc_path], encoding = 'UTF-8')
     return int(re.search(cheri_lines_pattern, data).group(1))
 
-def do_tests(tests, lib_path):
+def do_attacks(alloca, tests):
+    if alloca.no_attacks:
+        return {}, False
     results = {}
     if args.target_machine:
         assert('@' in args.target_machine)
@@ -303,9 +342,8 @@ def do_tests(tests, lib_path):
         cmd = os.path.join(work_dir_remote, os.path.basename(test))
         print(f"- Running test {cmd}")
         remote_env = {}
-        if lib_path:
-            print(f"-- with `LD_PRELOAD` at {lib_path}")
-            remote_env = { 'LD_PRELOAD' : lib_path }
+        print(f"-- with `LD_PRELOAD` at {alloca.remote_lib_path}")
+        remote_env = { 'LD_PRELOAD' : alloca.remote_lib_path }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
         with Connection(host=conn_host, user=conn_user, port=conn_port) as test_conn:
@@ -319,6 +357,20 @@ def do_tests(tests, lib_path):
         results[test]['stderr'] = test_res.stderr
         results[test]['time'] = runtime
     return results, validated
+
+def get_source_data(alloca):
+    if alloca.InstallMode == InstallMode.PKG:
+        cheribsd_ports_repo.git.fetch("origin", alloca.commit)
+        cheribsd_ports_repo.git.checkout(alloca.commit)
+        alloc_path = os.path.join(cheribsd_ports_repo.working_dir, alloca.cheribsd_ports_path)
+        assert(os.path.exists(alloc_path))
+        alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
+        alloc_data['cheri_loc'] = do_cheri_line_count(alloc_path)
+    else:
+        alloc_path = parse_path(alloca.source_path)
+        alloc_data['api'] = do_cheri_api(alloca.source_path, api_fns)
+        alloc_data['sloc'] = do_line_count(alloca.source_path)
+        alloc_data['cheri_loc'] = do_cheri_line_count(alloca.source_path)
 
 def do_cheri_api(source_dir, apis_info):
     api_fns = set()
@@ -507,11 +559,14 @@ if os.path.exists(symlink_name):
 os.symlink(work_dir_local, symlink_name)
 
 # Build and run new CHERI QEMU instance
-if not args.target_machine:
+if args.target_machine:
+    exec_env = ExecEnvironment(args.target_machine)
+else:
     qemu_child = prepare_cheri()
     if not qemu_child:
         log_message("Unable to build or run QEMU instance; exiting...")
         sys.exit(1)
+    exec_env = ExecEnvironment("root@localhost:10086")
 
 # Prepare remote work directories
 remote_homedir = subprocess.check_output(make_ssh_cmd("printf '$HOME'"), encoding = "UTF-8")
@@ -542,60 +597,25 @@ for alloc_folder in allocators:
         log_message("No `info.json` found; skipping...")
         continue
     with open(f"{alloc_folder}/info.json", 'r') as alloc_info_json:
-        alloc_info = json.load(alloc_info_json)
+        alloca = Allocator(alloc_folder, json.load(alloc_info_json))
     alloc_data = {}
-    alloc_data['name'] = os.path.basename(alloc_folder.removesuffix('/')).replace('_', '-')
+
+    # Get source
+    do_source(alloca)
 
     # Install
-    if not do_install(alloc_info['install'], compile_env):
-        if args.target_machine:
-            log_message(f"Unable to find package {alloc_info['install']['target']}; please install manually!")
-        else:
-            log_message(f"Unsupported install mode: {alloc_data['mode']}")
-        continue
+    if alloca.do_attacks:
+        do_install(alloca, compile_env)
+
+    alloc_data.update(do_attacks(alloca, tests))
 
     # Tests and validation
-    if alloc_info['install']['mode'] in ['cheribuild', 'repo'] \
-            and 'lib_file' in alloc_info['install'] \
-            and alloc_info['install']['lib_file'] \
-            and not os.path.isabs(alloc_info['install']['lib_file']):
-        remote_lib_path = os.path.join(work_dir_remote, os.path.basename(alloc_info['install']['lib_file']))
-    elif 'lib_file' in alloc_info['install']:
-        remote_lib_path = alloc_info['install']['lib_file']
-    else:
-        remote_lib_path = None
-    if 'no_run' in alloc_info['install'] or ('lib_file' in alloc_info['install'] and not alloc_info['install']['lib_file']):
-        alloc_data['results'] = False
-        alloc_data['validated'] = False
-    else:
-        alloc_data['results'], alloc_data['validated'] = do_tests(tests, remote_lib_path)
 
     # SLoCs, CHERI API calls count
-    if 'source' in alloc_info['install']:
-        alloc_path = parse_path(alloc_info['install']['source'])
-        alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
-        alloc_data['sloc'] = do_line_count(alloc_path)
-        alloc_data['cheri_loc'] = do_cheri_line_count(alloc_path)
-    elif alloc_info['install']['mode'] == 'repo':
-        alloc_path = os.path.join(work_dir_local, alloc_data['name'])
-        alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
-        alloc_data['sloc'] = do_line_count(alloc_path)
-        alloc_data['cheri_loc'] = do_cheri_line_count(alloc_path)
-    elif alloc_info['install']['mode'] == 'pkg64c':
-        cheribsd_ports_repo.git.fetch("origin", alloc_info['commit'])
-        cheribsd_ports_repo.git.checkout(alloc_info['commit'])
-        alloc_path = os.path.join(cheribsd_ports_repo.working_dir, alloc_info['cheribsd_ports_path'])
-        assert(os.path.exists(alloc_path))
-        alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
-        alloc_data['cheri_loc'] = do_cheri_line_count(alloc_path)
+    alloc_data.update(get_source_data(alloca))
 
     # Version info
-    if alloc_info['install']['mode'] in ['repo', 'cheribuild'] :
-        alloc_data['version'] = alloc_info['install']['commit']
-    elif alloc_info['install']['mode'] in ['pkg64c']:
-        alloc_data['version'] = alloc_info['install']['version']
-    else:
-        assert(False)
+    alloc_data['version'] = alloca.version
 
     print(alloc_data)
     results.append(alloc_data)
