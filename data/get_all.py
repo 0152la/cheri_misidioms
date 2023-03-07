@@ -259,7 +259,8 @@ def prepare_cheri():
     attempts_cd = 10
     while attempts < attempts_max:
         print(f"-- checking if QEMU running; try {attempts}...")
-        check_proc = exec_env.run_cmd("echo hi")
+        with Connection(f"root@localhost:{port}") as qemu_conn:
+            check_proc = qemu_conn.run("echo hi", warn = False)
         print(f"-- saw return code {check_proc.returncode}")
         if check_proc.returncode == 0:
             return qemu_child
