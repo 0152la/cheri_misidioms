@@ -11,6 +11,7 @@ import re
 import tempfile
 import time
 import sys
+import enum
 
 from operator import itemgetter
 
@@ -55,10 +56,13 @@ arg_parser.add_argument("--target-machine", action='store', default="",
         experiments on instead of using a QEMU instance. NOTE: This requires
         appropriate keys being set-up between the machines to communicate
         without further user input""")
+arg_parser.add_argument("--table-context", action='store_true',
+        help="""If set, will emit Latex tables with prologue and epilogue.
+        Otherwise, simply generates the table content""")
 args = arg_parser.parse_args()
 
 ################################################################################
-# Functions
+# Helper Functions
 ################################################################################
 
 def make_ssh_cmd(cmd):
@@ -159,7 +163,32 @@ def log_message(msg):
     log_fd.write(msg + '\n')
 
 ################################################################################
-# Main
+# Objects
+################################################################################
+
+class InstallType(enum.Enum):
+    REPO = enum.auto()
+    PKG = enum.auto()
+    CHERIBUILD = enum.auto()
+
+    @classmethod
+    def parse_mode(cls, mode):
+        if mode == "repo":
+            return InstallType.REPO
+        elif mode == "pkg64c":
+            return InstallType.PKG
+        elif mode == "cheribuild":
+            return InstallType.CHERIBUILD
+        else:
+            print(f"Wrong mode parsed: {mode}")
+            assert(False)
+
+class Allocator:
+    def __init__(self, json_data):
+        self.install_mode = InstallType.parse_mode(json_data['install']['mode'])
+
+################################################################################
+# Preparation
 ################################################################################
 
 def prepare_cheri():
@@ -209,6 +238,10 @@ def prepare_cheribsd_ports():
     else:
         repo = git.Repo(to_path)
     return repo
+
+################################################################################
+# Application
+################################################################################
 
 def do_install(info, compile_env):
     if info['mode'] == 'cheribuild':
@@ -274,7 +307,6 @@ def do_tests(tests, lib_path):
             print(f"-- with `LD_PRELOAD` at {lib_path}")
             remote_env = { 'LD_PRELOAD' : lib_path }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
-        # test_conn = Connection(host="localhost", user="root", port=10086, inline_ssh_env = True)
         start_time = time.perf_counter_ns()
         with Connection(host=conn_host, user=conn_user, port=conn_port) as test_conn:
             test_res = test_conn.run(cmd, env = remote_env, warn = True)
@@ -313,10 +345,21 @@ def do_cheri_api(source_dir, apis_info):
             not_found_funcs.append(api_fn)
     return found_apis, not_found_funcs
 
+################################################################################
+# Latex Tables
+################################################################################
+
 def do_table_cheri_api(results):
-    preamble = [r'\begin{table}[t]', r'\begin{center}', r'\begin{tabular}{lcrr}']
-    preamble += [r'\toprule', r'allocator & API & \# API calls & \# builtin calls \\']
-    preamble += [r'\midrule']
+    preamble = []
+    epilogue = []
+    if args.table_context:
+        preamble = [r'\begin{table}[t]', r'\begin{center}', r'\begin{tabular}{lcrr}']
+        preamble += [r'\toprule', r'allocator & API & \# API calls & \# builtin calls \\']
+        preamble += [r'\midrule']
+
+        epilogue = [r'\\ \bottomrule', r'\end{tabular}']
+        epilogue += [r'\caption{\label{tab:rq1}Coverage of CHERI API calls by various allocators}']
+        epilogue += [r'\label{tab:atks}', r'\end{center}', r'\end{table}']
     entries = []
     for result in results:
         if not 'api' in result:
@@ -327,9 +370,6 @@ def do_table_cheri_api(results):
         entry.append(result['api'][0][api_key])
         entry.append(result['api'][0]['builtin'])
         entries.append(' & '.join(map(str, entry)))
-    epilogue = [r'\\ \bottomrule', r'\end{tabular}']
-    epilogue += [r'\caption{\label{tab:rq1}Coverage of CHERI API calls by various allocators}']
-    epilogue += [r'\label{tab:atks}', r'\end{center}', r'\end{table}']
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
 
@@ -355,13 +395,23 @@ def do_table_tests_entries(result, test_names):
     return new_entry
 
 def do_table_tests(results):
-    # latexify = lambda x : r'\tbl' + x.replace('_', '').replace('2', "two").replace('3', "three")
     test_names = [os.path.splitext(x)[0] for x in map(os.path.basename, sorted(tests)) if not os.path.splitext(x)[0] in (config["table_tests_to_ignore"] + config["tests_to_ignore"])]
-    # header_fields = len(test_names) * 'c'
-    preamble = []
-    # preamble += [r'\begin{table}[t]', r'\begin{center}', r'\begin{tabular}{l' + header_fields + r'}']
-    # preamble += [r'\toprule', r'Allocator & ' + ' & '.join(map(latexify, test_names)) + r'\\']
-    # preamble += [r'\midrule']
+    preamble = f'% {" & ".join(test_names)}'
+    epilogue = []
+    if args.table_context:
+        latexify = lambda x : r'\tbl' + x.replace('_', '').replace('2', "two").replace('3', "three")
+        header_fields = len(test_names) * 'c'
+        preamble += [r'\begin{table}[t]', r'\begin{center}', r'\begin{tabular}{l' + header_fields + r'}']
+        preamble += [r'\toprule', r'Allocator & ' + ' & '.join(map(latexify, test_names)) + r'\\']
+        preamble += [r'\midrule']
+
+        epilogue = [r'\input{./data/results/tests_extra.tex}']
+        epilogue += [r'\\ \bottomrule', r'\end{tabular}']
+        epilogue += [r'''\caption{Attacks which succeed on a given allocator
+        are marked with a $\times$, while unsuccessful attacks are marked with
+        a $\checkmark$; attack executions which fail due to other reasons
+        (e.g., segmentation faults) are marked with $\oslash$.}''']
+        epilogue += [r'\label{tab:atks}', r'\end{center}', r'\end{table}']
     entries = []
     for result in results:
         if not result['results'] or not result['validated']:
@@ -369,20 +419,23 @@ def do_table_tests(results):
         entry = [result['name']]
         entry.extend(do_table_tests_entries(result, test_names))
         entries.append(' & '.join(entry))
-    epilogue = []
-    # epilogue = [r'\input{./data/results/tests_extra.tex}']
-    # epilogue += [r'\\ \bottomrule', r'\end{tabular}']
-    # epilogue += [r'\caption{Attacks which succeed on a given allocator are marked with a $\times$, while unsuccessful attacks are marked with a $\checkmark$; attack executions which fail due to other reasons (e.g., segmentation faults) are marked with $\oslash$.}']
-    # epilogue += [r'\label{tab:atks}', r'\end{center}', r'\end{table}']
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
 
 def do_table_slocs(results):
     preamble = []
-    # preamble += [r'\begin{table}[tb]', r'\begin{center}', r'\begin{tabular}{lcrrr}']
-    # preamble += [r'\toprule', ' & '.join(['Allocator', 'Version', 'SLoC', r'\multicolumn{2}{c}{Changed}']) + r'\\']
-    # preamble += [r'\cmidrule(lr){4-5}', ' & '.join([' ', ' ', ' ', 'LoC', r'\multicolumn{1}{c}{\%}']) + r'\\']
-    # preamble += [r'\midrule']
+    epilogue = []
+    if args.table_context:
+        preamble += [r'\begin{table}[tb]', r'\begin{center}', r'\begin{tabular}{lcrrr}']
+        preamble += [r'\toprule', ' & '.join(['Allocator', 'Version', 'SLoC', r'\multicolumn{2}{c}{Changed}']) + r'\\']
+        preamble += [r'\cmidrule(lr){4-5}', ' & '.join([' ', ' ', ' ', 'LoC', r'\multicolumn{1}{c}{\%}']) + r'\\']
+        preamble += [r'\midrule']
+
+        epilogue += [r'\\ \bottomrule', r'\end{tabular}', r'\end{center}']
+        epilogue += [r'''\caption{The allocators we examined, their size in
+                Source Lines of Code (SLoC), and the number of lines changed to
+                adapt them for pure capability CheriBSD.}''']
+        epilogue += [r'\label{tab:allocator_summary}', r'\end{table}']
     entries = []
     for result in results:
         entry = [result['name']]
@@ -394,10 +447,6 @@ def do_table_slocs(results):
         else:
             entry.extend(['-', '-', '-'])
         entries.append(' & '.join(map(str, entry)))
-    epilogue = []
-    # epilogue += [r'\\ \bottomrule', r'\end{tabular}', r'\end{center}']
-    # epilogue += [r'\caption{The allocators we examined, their size in Source Lines of Code (SLoC), and the number of lines changed to adapt them for pure capability CheriBSD.}']
-    # epilogue += [r'\label{tab:allocator_summary}', r'\end{table}']
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
 
@@ -410,7 +459,9 @@ def do_all_tables(results):
     with open(os.path.join(work_dir_local, "slocs.tex"), 'w') as slocs_fd:
         slocs_fd.write(do_table_slocs(results))
 
-#-------------------------------------------------------------------------------
+################################################################################
+# Main
+################################################################################
 
 # Initial setup
 config_path = "./config.json"
@@ -521,7 +572,6 @@ for alloc_folder in allocators:
 
     # SLoCs, CHERI API calls count
     if 'source' in alloc_info['install']:
-        # alloc_path = alloc_info['install']['source'].replace('$HOME', os.getenv('HOME'))
         alloc_path = parse_path(alloc_info['install']['source'])
         alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
         alloc_data['sloc'] = do_line_count(alloc_path)
