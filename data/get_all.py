@@ -54,10 +54,10 @@ arg_parser.add_argument("--parse-data-only", action='store', default="",
         help="Parse given results file to generate LaTeX tables.")
 arg_parser.add_argument("--target-machine", action='store', default="",
         type=str, metavar="IP",
-        help="""IP address of a CHERI-enabled machine on the network to run
-        experiments on instead of using a QEMU instance. NOTE: This requires
-        appropriate keys being set-up between the machines to communicate
-        without further user input""")
+        help="""Address of a CHERI-enabled machine on the network to run
+        experiments on instead of using a QEMU instance. Expected format is
+        `user@host:port`. NOTE: This requires appropriate keys being set-up
+        between the machines to communicate without further user input""")
 arg_parser.add_argument("--table-context", action='store_true',
         help="""If set, will emit Latex tables with prologue and epilogue.
         Otherwise, simply generates the table content""")
@@ -66,15 +66,6 @@ args = arg_parser.parse_args()
 ################################################################################
 # Helper Functions
 ################################################################################
-
-def make_ssh_cmd(cmd):
-    if args.target_machine:
-        target = args.target_machine
-        port = ""
-    else:
-        target = "root@localhost"
-        port = f'-p{config["cheri_qemu_port"]}'
-    return shlex.split(f'ssh -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" {port} -t {target} {cmd}')
 
 def make_scp_cmd(path_from, path_to):
     if args.target_machine:
@@ -92,9 +83,6 @@ def make_cheribuild_cmd(target, flags = ""):
 
 def make_grep_pattern_cmd(pattern, target):
     return shlex.split(f"grep -oIrhe '{pattern}' {target}")
-
-def make_install_alloc_cmd(alloc_name, alloc_ver):
-    return make_ssh_cmd(f"pkg64c install -y {alloc_name}-{alloc_ver}")
 
 def make_cloc_cmd(path):
     return shlex.split(f"cloc --json {path}")
@@ -220,13 +208,21 @@ class Allocator:
 
 class ExecEnvironment:
     def __init__(self, addr):
-        assert('@' in addr)
-        self.user, self.ip = addr.split('@')
-        if ':' in self.ip:
-            self.ip, self.port = self.ip.split(':')
-            self.port = int(self.port)
-        else:
-            self.port = 22
+        addr_regex = "(\w+)@([\w\.]+):(\d+)"
+        self.user, self.host, self.port = re.match(addr_regex, addr).groups()
+        self.conn = Connection(host = self.host, user = self.user, port = self.port)
+
+    def __del__(self):
+        self.conn.close()
+
+    def install_alloc(self, alloc, version):
+        return self.run_cmd(f"pkg64c install -y {alloc}-{version}", check = True)
+
+    def run_cmd(self, cmd, env = {}, check = False):
+        return self.conn.run(cmd, env = env, warn = not check)
+
+    def put_file(self, src, dest):
+        return self.conn.put(src, remote = dest)
 
 ################################################################################
 # Preparation
@@ -263,7 +259,7 @@ def prepare_cheri():
     attempts_cd = 10
     while attempts < attempts_max:
         print(f"-- checking if QEMU running; try {attempts}...")
-        check_proc = subprocess.run(make_ssh_cmd('echo hi'), check = False)
+        check_proc = exec_env.run_cmd("echo hi")
         print(f"-- saw return code {check_proc.returncode}")
         if check_proc.returncode == 0:
             return qemu_child
@@ -315,10 +311,10 @@ def do_install(alloca, compile_env):
         subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
     elif alloca.install_mode == InstallMode.PKG:
         if args.target_machine:
-            check_cmd = subprocess.run(make_ssh_cmd(f"pkg64c info {alloca.install_target}"))
+            check_cmd = exec_env.run_cmd(f"pkg64c info {alloca.install_target}")
             return check_cmd.returncode == 0
         else:
-            subprocess.run(make_install_alloc_cmd(alloca.install_target, alloca.version))
+            exec_env.install_alloc(alloca.install_target, alloca.version)
 
 def do_line_count(source_path):
     cloc_data = json.loads(subprocess.check_output(make_cloc_cmd(source_path), encoding = 'UTF-8'))
@@ -363,14 +359,13 @@ def do_attacks(alloca, tests):
 def get_source_data(alloca):
     source_data = {}
     if alloca.install_mode == InstallMode.PKG:
-        cheribsd_ports_repo.git.fetch("origin", alloca.commit)
-        cheribsd_ports_repo.git.checkout(alloca.commit)
+        cheribsd_ports_repo.git.fetch("origin", alloca.cheribsd_ports_commit)
+        cheribsd_ports_repo.git.checkout(alloca.cheribsd_ports_commit)
         alloc_path = os.path.join(cheribsd_ports_repo.working_dir, alloca.cheribsd_ports_path)
         assert(os.path.exists(alloc_path))
         source_data['api'] = do_cheri_api(alloc_path, api_fns)
         source_data['cheri_loc'] = do_cheri_line_count(alloc_path)
     else:
-        source_path = parse_path(alloca.source_path)
         source_data['api'] = do_cheri_api(alloca.source_path, api_fns)
         source_data['sloc'] = do_line_count(alloca.source_path)
         source_data['cheri_loc'] = do_cheri_line_count(alloca.source_path)
@@ -573,10 +568,13 @@ else:
     exec_env = ExecEnvironment("root@localhost:10086")
 
 # Prepare remote work directories
-remote_homedir = subprocess.check_output(make_ssh_cmd("printf '$HOME'"), encoding = "UTF-8")
-subprocess.run(make_ssh_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}"), check = True)
-work_dir_remote = subprocess.check_output(make_ssh_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX"), encoding = "UTF-8")
-work_dir_remote = work_dir_remote.strip()
+remote_homedir = exec_env.run_cmd("printf '$HOME'", check = True)
+exec_env.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}", check = True)
+work_dir_remote = exec_env.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX", check = True).stdout.strip()
+# remote_homedir = subprocess.check_output(make_ssh_cmd("printf '$HOME'"), encoding = "UTF-8")
+# subprocess.run(make_ssh_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}"), check = True)
+# work_dir_remote = subprocess.check_output(make_ssh_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX"), encoding = "UTF-8")
+# work_dir_remote = work_dir_remote.strip()
 log_message(f"Set remote work directory to {work_dir_remote}")
 
 # Prepare tests and read API data
@@ -611,9 +609,8 @@ for alloc_folder in allocators:
     if not alloca.no_attacks:
         do_install(alloca, compile_env)
 
+    # Attacks and validation
     alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, tests)
-
-    # Tests and validation
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
