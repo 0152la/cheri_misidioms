@@ -47,8 +47,8 @@ arg_parser.add_argument("--log-file", type=str, action='store',
 arg_parser.add_argument("--no-build-cheri", action="store_true",
         help="""Whether to build CheriBSD and the QEMU image from scratch. Only
         set if `local-dir` is set with a pre-existing build within.""")
-arg_parse.add_argument("--no-wait-qemu", action="store_true",
-        help="If set, assumes the QEMU instance is running, and skip waiting").
+arg_parser.add_argument("--no-wait-qemu", action="store_true",
+        help="If set, assumes the QEMU instance is running, and skip waiting.")
 arg_parser.add_argument("--parse-data-only", action='store', default="",
         type=str, metavar="path",
         help="Parse given results file to generate LaTeX tables.")
