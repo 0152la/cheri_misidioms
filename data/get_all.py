@@ -193,9 +193,10 @@ class InstallMode(enum.Enum):
 class Allocator:
     def __init__(self, folder, json_data):
         self.name = os.path.basename(folder.removesuffix('/')).replace('_', '-')
-        self.info_folder = folder
+        self.info_folder = os.path.abspath(folder)
         self.install_mode = InstallMode.parse_mode(json_data['install']['mode'])
         self.install_target = json_data['install']['target']
+        self.lib_file = parse_path(json_data['install']['lib_file'])
         if self.install_mode == InstallMode.PKG:
             # self.source_path =
             self.remote_lib_path = json_data['install']['lib_file']
@@ -203,11 +204,10 @@ class Allocator:
             self.cheribsd_ports_commit = json_data['commit']
         elif self.install_mode == InstallMode.CHERIBUILD:
             self.source_path = parse_path(json_data['install']['source'])
-            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(alloca.lib_file))
+            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(self.lib_file))
         elif self.install_mode == InstallMode.REPO:
             self.source_path = os.path.join(base_cwd, self.name)
-            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(alloca.lib_file))
-        self.lib_file = parse_path(json_data['install']['lib_file'])
+            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(self.lib_file))
         if not os.path.isabs(self.lib_file):
             self.lib_file = os.path.join(self.source_path, self.lib_file)
         self.version = self.install_mode.parse_version(json_data['install'])
@@ -215,6 +215,7 @@ class Allocator:
         self.raw_data = json_data
 
     def get_build_file_path(self):
+        print(self.info_folder)
         return os.path.join(self.info_folder, self.raw_data['install']['build_file'])
 
 class ExecEnvironment:
@@ -255,7 +256,8 @@ def prepare_cheri():
     with open(os.path.join(work_dir_local, "qemu_child.log"), 'w') as qemu_child_log:
         qemu_child = subprocess.Popen(shlex.split(qemu_cmd), stdin = subprocess.PIPE, stdout = qemu_child_log, stderr = qemu_child_log)
     print("Waiting for emulator...")
-    time.sleep(2 * 60) # wait for instance to boot
+    if not args.no_wait_qemu:
+        time.sleep(2 * 60) # wait for instance to boot
     attempts = 0
     attempts_max = 5
     attempts_cd = 10
@@ -286,14 +288,14 @@ def prepare_cheribsd_ports():
 def do_source(alloca):
     if alloca.install_mode == InstallMode.CHERIBUILD:
         os.chdir(get_config('cheribuild_folder'))
-        subprocess.run(make_cheribuild_cmd(alloca.target, "--configure-only"), stdout = None)
+        subprocess.run(make_cheribuild_cmd(alloca.install_target, "--configure-only"), stdout = None)
         repo = git.Repo(path = subprocess.check_output(shlex.split("git rev-parse --show-toplevel"), cwd = alloca.source_path, encoding = 'UTF-8').strip())
         repo.git.fetch("origin", alloca.version)
         repo.git.checkout(alloca.version)
         os.chdir(base_cwd)
-    elif alloca.install_type == InstallMode.REPO:
+    elif alloca.install_mode == InstallMode.REPO:
         if not os.path.exists(alloca.source_path):
-            repo = git.Repo.clone_from(url = alloca.target, to_path = alloca.source_path)
+            repo = git.Repo.clone_from(url = alloca.install_target, to_path = alloca.source_path)
         else:
             repo = git.Repo(alloca.source_path)
         repo.git.fetch("origin", alloca.version)
@@ -305,18 +307,18 @@ def do_source(alloca):
 def do_install(alloca, compile_env):
     if alloca.install_mode == InstallMode.CHERIBUILD:
         os.chdir(get_config('cheribuild_folder'))
-        subprocess.run(make_cheribuild_cmd(alloca.target, "-c"), stdout = None)
+        subprocess.run(make_cheribuild_cmd(alloca.install_target, "-c"), stdout = None)
         os.chdir(base_cwd)
         subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
-    elif alloca.install_type == InstallMode.REPO:
+    elif alloca.install_mode == InstallMode.REPO:
         subprocess.run([alloca.get_build_file_path(), work_dir_local], env = compile_env, cwd = alloca.source_path)
         subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
     elif alloca.install_mode == InstallMode.PKG:
         if args.target_machine:
-            check_cmd = subprocess.run(make_ssh_cmd(f"pkg64c info {alloca.target}"))
+            check_cmd = subprocess.run(make_ssh_cmd(f"pkg64c info {alloca.install_target}"))
             return check_cmd.returncode == 0
         else:
-            subprocess.run(make_install_alloc_cmd(alloca.target, alloca.version))
+            subprocess.run(make_install_alloc_cmd(alloca.install_target, alloca.version))
 
 def do_line_count(source_path):
     cloc_data = json.loads(subprocess.check_output(make_cloc_cmd(source_path), encoding = 'UTF-8'))
@@ -359,18 +361,20 @@ def do_attacks(alloca, tests):
     return results, validated
 
 def get_source_data(alloca):
-    if alloca.InstallMode == InstallMode.PKG:
+    source_data = {}
+    if alloca.install_mode == InstallMode.PKG:
         cheribsd_ports_repo.git.fetch("origin", alloca.commit)
         cheribsd_ports_repo.git.checkout(alloca.commit)
         alloc_path = os.path.join(cheribsd_ports_repo.working_dir, alloca.cheribsd_ports_path)
         assert(os.path.exists(alloc_path))
-        alloc_data['api'] = do_cheri_api(alloc_path, api_fns)
-        alloc_data['cheri_loc'] = do_cheri_line_count(alloc_path)
+        source_data['api'] = do_cheri_api(alloc_path, api_fns)
+        source_data['cheri_loc'] = do_cheri_line_count(alloc_path)
     else:
-        alloc_path = parse_path(alloca.source_path)
-        alloc_data['api'] = do_cheri_api(alloca.source_path, api_fns)
-        alloc_data['sloc'] = do_line_count(alloca.source_path)
-        alloc_data['cheri_loc'] = do_cheri_line_count(alloca.source_path)
+        source_path = parse_path(alloca.source_path)
+        source_data['api'] = do_cheri_api(alloca.source_path, api_fns)
+        source_data['sloc'] = do_line_count(alloca.source_path)
+        source_data['cheri_loc'] = do_cheri_line_count(alloca.source_path)
+    return source_data
 
 def do_cheri_api(source_dir, apis_info):
     api_fns = set()
@@ -598,16 +602,16 @@ for alloc_folder in allocators:
         continue
     with open(f"{alloc_folder}/info.json", 'r') as alloc_info_json:
         alloca = Allocator(alloc_folder, json.load(alloc_info_json))
-    alloc_data = {}
+    alloc_data = {"name": alloca.name}
 
     # Get source
     do_source(alloca)
 
     # Install
-    if alloca.do_attacks:
+    if not alloca.no_attacks:
         do_install(alloca, compile_env)
 
-    alloc_data.update(do_attacks(alloca, tests))
+    alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, tests)
 
     # Tests and validation
 
