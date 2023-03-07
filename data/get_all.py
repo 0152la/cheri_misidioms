@@ -261,8 +261,8 @@ def prepare_cheri():
         print(f"-- checking if QEMU running; try {attempts}...")
         with Connection(f"root@localhost:{port}") as qemu_conn:
             check_proc = qemu_conn.run("echo hi", warn = False)
-        print(f"-- saw return code {check_proc.returncode}")
-        if check_proc.returncode == 0:
+        print(f"-- saw return code {check_proc.exited}")
+        if check_proc.exited == 0:
             return qemu_child
         attempts += 1
         time.sleep(attempts_cd)
@@ -561,7 +561,7 @@ else:
     exec_env = ExecEnvironment("root@localhost:10086")
 
 # Prepare remote work directories
-remote_homedir = exec_env.run_cmd("printf '$HOME'", check = True)
+remote_homedir = exec_env.run_cmd("printf $HOME", check = True).stdout
 exec_env.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}", check = True)
 work_dir_remote = exec_env.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX", check = True).stdout.strip()
 # remote_homedir = subprocess.check_output(make_ssh_cmd("printf '$HOME'"), encoding = "UTF-8")
