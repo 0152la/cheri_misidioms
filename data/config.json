@@ -11,6 +11,7 @@
     "cheri_qemu_test_folder": "$RHOME/tests",
     "data_get_script_path": "$CWD/get_data.py",
     "attacks_folder": "$CWD/../code",
+    "benchmarks_folder": "$CWD/../code/benchmarks",
     "allocators_folder": "$CWD/allocators",
     "table_attacks_to_ignore":
     [

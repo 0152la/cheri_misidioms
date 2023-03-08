@@ -71,6 +71,12 @@ args = arg_parser.parse_args()
 # Helper Functions
 ################################################################################
 
+def make_cmake_config_cmd(source, build, toolchain):
+    return shlex.split(
+        """cmake -S {source} -B {build} -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX={build}/install -Dgclib=jemalloc
+        -Dbm_logfile=out.json -DCMAKE_TOOLCHAIN_FILE={toolchain}""")
+
 def make_cheribuild_cmd(target, flags = ""):
     cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {work_dir_local}/cheribuild {flags} {target}')
     return cmd
@@ -81,10 +87,6 @@ def make_grep_pattern_cmd(pattern, target):
 def make_cloc_cmd(path):
     return shlex.split(f"cloc --json {path}")
 
-def make_replace(path):
-    path = path.replace('$HOME', os.getenv('HOME'))
-    return path
-
 def prepare_attacks(attacks_path, dest_path):
     attack_sources = glob.glob(os.path.join(attacks_path, "*.c"))
     for to_ignore in config["attacks_to_ignore"]:
@@ -93,12 +95,28 @@ def prepare_attacks(attacks_path, dest_path):
     assert(attack_sources)
     attacks = []
     compile_cmd = f"{os.path.join(work_dir_local, 'cheribuild', 'output', 'morello-sdk', 'bin', 'clang')} --std=c11 -Wall --config cheribsd-morello-purecap.cfg"
+    compile_cmd = shlex.split(compile_cmd)
     for source in attack_sources:
         attack = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
-        subprocess.run(shlex.split(compile_cmd) + ['-o', attack, source], check = True)
+        subprocess.run(compile_cmd + ['-o', attack, source], check = True)
         attacks.append(attack)
         exec_env.put_file(attack, dest_path)
     return attacks
+
+def prepare_benchs(bench_sources, dest_path):
+    assert(os.path.exists(bench_sources))
+    cmake_config_cmd = """cmake -S {source} -B {dest}/benchs/build -DCMAKE_BUILD_TYPE=Release
+        -DCMAKE_INSTALL_PREFIX={dest}/benchs/install -Dgclib=jemalloc
+        -Dbm_logfile=out.json -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+    for toolchain_type in ["hybrid", "purecap"]:
+        subprocess.check_call(shlex.split(
+            cmake_config_cmd.format(source = bench_sources, \
+                                    dest = work_dir_local, toolchain =
+                                    f"{bench_sources}/morello-{toolchain_type}.cmake")))
+        subprocess.check_call(shlex.split(f"cmake --build {work_dir_local}/benchs_build"))
+        subprocess.check_call(shlex.split(f"cmake --install {work_dir_local}/benchs_build"))
+    benchs = pathlib.Path(f"{work_dir_local}/benchs_install").glob("**/*.elf")
+    return benchs
 
 def get_config(to_get):
     return parse_path(config[to_get])
@@ -566,7 +584,7 @@ api_fns = read_apis(get_config('cheri_api_path'))
 cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare benchmarks
-
+benchs = sorted(prepare_benchs(get_config('bench_folder'), work_dir_remote))
 
 # Environment for cross-compiling
 compile_env = {
