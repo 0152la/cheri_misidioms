@@ -67,18 +67,8 @@ args = arg_parser.parse_args()
 # Helper Functions
 ################################################################################
 
-def make_scp_cmd(path_from, path_to):
-    if args.target_machine:
-        target = args.target_machine
-        port = ""
-    else:
-        target = "root@localhost"
-        port = f'-P{config["cheri_qemu_port"]}'
-    return shlex.split(f'scp -o "StrictHostKeyChecking=no" -o "UserKnownHostsFile=/dev/null" {port} {path_from} {target}:{path_to}')
-
 def make_cheribuild_cmd(target, flags = ""):
     cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {work_dir_local}/cheribuild {flags} {target}')
-    print(f"MADE {cmd}")
     return cmd
 
 def make_grep_pattern_cmd(pattern, target):
@@ -103,7 +93,7 @@ def prepare_tests(tests_path, dest_path):
         test = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
         subprocess.run(shlex.split(compile_cmd) + ['-o', test, source], check = True)
         tests.append(test)
-    subprocess.run(make_scp_cmd(" ".join(tests), f"{dest_path}"), check = True)
+        exec_env.put_file(test, dest_path)
     return tests
 
 def get_config(to_get):
@@ -306,10 +296,10 @@ def do_install(alloca, compile_env):
         os.chdir(get_config('cheribuild_folder'))
         subprocess.run(make_cheribuild_cmd(alloca.install_target, "-c"), stdout = None)
         os.chdir(base_cwd)
-        subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
+        exec_env.put_file(alloca.lib_file, work_dir_remote)
     elif alloca.install_mode == InstallMode.REPO:
         subprocess.run([alloca.get_build_file_path(), work_dir_local], env = compile_env, cwd = alloca.source_path)
-        subprocess.run(make_scp_cmd(alloca.lib_file, work_dir_remote), check = True)
+        exec_env.put_file(alloca.lib_file, work_dir_remote)
     elif alloca.install_mode == InstallMode.PKG:
         if args.target_machine:
             check_cmd = exec_env.run_cmd(f"pkg64c info {alloca.install_target}")
