@@ -85,20 +85,20 @@ def make_replace(path):
     path = path.replace('$HOME', os.getenv('HOME'))
     return path
 
-def prepare_tests(tests_path, dest_path):
-    test_sources = glob.glob(os.path.join(tests_path, "*.c"))
-    for to_ignore in config["tests_to_ignore"]:
-        test_sources = [x for x in test_sources if not to_ignore in x]
-    log_message(f"Found tests in {tests_path}: {test_sources}")
-    assert(test_sources)
-    tests = []
+def prepare_attacks(attacks_path, dest_path):
+    attack_sources = glob.glob(os.path.join(attacks_path, "*.c"))
+    for to_ignore in config["attacks_to_ignore"]:
+        attack_sources = [x for x in attack_sources if not to_ignore in x]
+    log_message(f"Found attacks in {attacks_path}: {attack_sources}")
+    assert(attack_sources)
+    attacks = []
     compile_cmd = f"{os.path.join(work_dir_local, 'cheribuild', 'output', 'morello-sdk', 'bin', 'clang')} --std=c11 -Wall --config cheribsd-morello-purecap.cfg"
-    for source in test_sources:
-        test = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
-        subprocess.run(shlex.split(compile_cmd) + ['-o', test, source], check = True)
-        tests.append(test)
-        exec_env.put_file(test, dest_path)
-    return tests
+    for source in attack_sources:
+        attack = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
+        subprocess.run(shlex.split(compile_cmd) + ['-o', attack, source], check = True)
+        attacks.append(attack)
+        exec_env.put_file(attack, dest_path)
+    return attacks
 
 def get_config(to_get):
     return parse_path(config[to_get])
@@ -319,27 +319,27 @@ def do_cheri_line_count(alloc_path):
     data = subprocess.check_output([get_config('data_get_script_path'), "cheri-line-count", alloc_path], encoding = 'UTF-8')
     return int(re.search(cheri_lines_pattern, data).group(1))
 
-def do_attacks(alloca, tests):
+def do_attacks(alloca, attacks):
     if alloca.no_attacks:
         return {}, False
     results = {}
-    for test in tests:
-        cmd = os.path.join(work_dir_remote, os.path.basename(test))
-        print(f"- Running test {cmd}")
+    for attack in attacks:
+        cmd = os.path.join(work_dir_remote, os.path.basename(attack))
+        print(f"- Running attack {cmd}")
         remote_env = {}
         print(f"-- with `LD_PRELOAD` at {alloca.remote_lib_path}")
         remote_env = { 'LD_PRELOAD' : alloca.remote_lib_path }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
-        test_res = exec_env.run_cmd(cmd, env = remote_env, check = False)
+        attack_res = exec_env.run_cmd(cmd, env = remote_env, check = False)
         runtime = time.perf_counter_ns() - start_time
-        if "validate" in test:
-            validated = test_res.exited == 0
-        results[test] = {}
-        results[test]['exit_code'] = test_res.exited
-        results[test]['stdout'] = test_res.stdout
-        results[test]['stderr'] = test_res.stderr
-        results[test]['time'] = runtime
+        if "validate" in attack:
+            validated = attack_res.exited == 0
+        results[attack] = {}
+        results[attack]['exit_code'] = attack_res.exited
+        results[attack]['stdout'] = attack_res.stdout
+        results[attack]['stderr'] = attack_res.stderr
+        results[attack]['time'] = runtime
     return results, validated
 
 def get_source_data(alloca):
@@ -410,9 +410,9 @@ def do_table_cheri_api(results):
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
 
-def do_table_tests_parse_result(result, test):
-    if result["results"][test]["exit_code"] == 0:
-        result_stdout = result["results"][test]["stdout"]
+def do_table_attacks_parse_result(result, attack):
+    if result["results"][attack]["exit_code"] == 0:
+        result_stdout = result["results"][attack]["stdout"]
         if "Attack unsuccessful" in result_stdout:
             return r'$\checkmark$'
         elif "Attack successful" in result_stdout:
@@ -422,27 +422,27 @@ def do_table_tests_parse_result(result, test):
     else:
         return r'$\oslash$'
 
-def do_table_tests_entries(result, test_names):
+def do_table_attacks_entries(result, attack_names):
     new_entry = []
-    test_sources = tests if not args.parse_data_only else sorted(result["results"].keys())
-    for test in test_sources:
-        if os.path.basename(test) in config["table_tests_to_ignore"]:
+    attack_sources = attacks if not args.parse_data_only else sorted(result["results"].keys())
+    for attack in attack_sources:
+        if os.path.basename(attack) in config["table_attacks_to_ignore"]:
             continue
-        new_entry.append(do_table_tests_parse_result(result, test))
+        new_entry.append(do_table_attacks_parse_result(result, attack))
     return new_entry
 
-def do_table_tests(results):
-    test_names = [os.path.splitext(x)[0] for x in map(os.path.basename, sorted(tests)) if not os.path.splitext(x)[0] in (config["table_tests_to_ignore"] + config["tests_to_ignore"])]
-    preamble = f'% {" & ".join(test_names)}'
+def do_table_attacks(results):
+    attack_names = [os.path.splitext(x)[0] for x in map(os.path.basename, sorted(attacks)) if not os.path.splitext(x)[0] in (config["table_attacks_to_ignore"] + config["attacks_to_ignore"])]
+    preamble = f'% {" & ".join(attack_names)}'
     epilogue = []
     if args.table_context:
         latexify = lambda x : r'\tbl' + x.replace('_', '').replace('2', "two").replace('3', "three")
-        header_fields = len(test_names) * 'c'
+        header_fields = len(attack_names) * 'c'
         preamble += [r'\begin{table}[t]', r'\begin{center}', r'\begin{tabular}{l' + header_fields + r'}']
-        preamble += [r'\toprule', r'Allocator & ' + ' & '.join(map(latexify, test_names)) + r'\\']
+        preamble += [r'\toprule', r'Allocator & ' + ' & '.join(map(latexify, attack_names)) + r'\\']
         preamble += [r'\midrule']
 
-        epilogue = [r'\input{./data/results/tests_extra.tex}']
+        epilogue = [r'\input{./data/results/attacks_extra.tex}']
         epilogue += [r'\\ \bottomrule', r'\end{tabular}']
         epilogue += [r'''\caption{Attacks which succeed on a given allocator
         are marked with a $\times$, while unsuccessful attacks are marked with
@@ -454,7 +454,7 @@ def do_table_tests(results):
         if not result['results'] or not result['validated']:
             continue
         entry = [result['name']]
-        entry.extend(do_table_tests_entries(result, test_names))
+        entry.extend(do_table_attacks_entries(result, attack_names))
         entries.append(' & '.join(entry))
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
@@ -491,8 +491,8 @@ def do_all_tables(results):
     results = sorted(results, key = itemgetter("name"))
     with open(os.path.join(work_dir_local, "cheri_api.tex"), 'w') as cheri_api_fd:
         cheri_api_fd.write(do_table_cheri_api(results))
-    with open(os.path.join(work_dir_local, "tests.tex"), 'w') as tests_fd:
-        tests_fd.write(do_table_tests(results))
+    with open(os.path.join(work_dir_local, "tests.tex"), 'w') as attacks_fd:
+        attacks_fd.write(do_table_attacks(results))
     with open(os.path.join(work_dir_local, "slocs.tex"), 'w') as slocs_fd:
         slocs_fd.write(do_table_slocs(results))
 
@@ -530,7 +530,7 @@ if args.parse_data_only:
     log_message(f"Parsing results file at {args.parse_data_only}.")
     with open(args.parse_data_only, 'r') as results_fd:
         results = json.load(results_fd)
-    tests = sorted([x for x in glob.glob(os.path.join(get_config('tests_folder'), "*.c"))])
+    attacks = sorted([x for x in glob.glob(os.path.join(get_config('attacks_folder'), "*.c"))])
     api_fns = read_apis(get_config('cheri_api_path'))
     do_all_tables(results)
     log_message(f"DONE in {work_dir_local}")
@@ -560,10 +560,13 @@ exec_env.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}", check = Tru
 work_dir_remote = exec_env.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX", check = True).stdout.strip()
 log_message(f"Set remote work directory to {work_dir_remote}")
 
-# Prepare tests and read API data
-tests = sorted(prepare_tests(get_config('tests_folder'), work_dir_remote))
+# Prepare attacks and read API data
+attacks = sorted(prepare_attacks(get_config('attacks_folder'), work_dir_remote))
 api_fns = read_apis(get_config('cheri_api_path'))
 cheribsd_ports_repo = prepare_cheribsd_ports()
+
+# Prepare benchmarks
+
 
 # Environment for cross-compiling
 compile_env = {
@@ -593,7 +596,7 @@ for alloc_folder in allocators:
         do_install(alloca, compile_env)
 
     # Attacks and validation
-    alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, tests)
+    alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks)
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
