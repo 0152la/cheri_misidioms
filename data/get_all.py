@@ -104,17 +104,17 @@ def prepare_attacks(attacks_path, dest_path):
         exec_env.put_file(attack, dest_path)
     return attacks
 
-def prepare_benchs(bench_sources, dest_path):
+def prepare_benchs(bench_sources):
     assert(os.path.exists(bench_sources))
     cmake_config_cmd = """cmake -S {source} -B {dest}/benchs/build -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX={dest}/benchs/install -Dgclib=jemalloc
-        -Dbm_logfile=out.json -DSDK={cheribuild_out} -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+        -Dbm_logfile=out.json -DSDK={sdk} -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     for toolchain_type in ["hybrid", "purecap"]:
         subprocess.check_call(shlex.split(
             cmake_config_cmd.format(source = bench_sources, dest =
-                work_dir_local, sdk = get_config("cheribuild_folder"),
-                toolchain =
-                f"{bench_sources}/morello-{toolchain_type}.cmake")))
+                work_dir_local, sdk =
+                os.path.join(get_config('cheribuild_folder'), "output", "morello-sdk"),
+                toolchain = f"os.path.join({bench_sources}, morello-{toolchain_type}.cmake")))
         subprocess.check_call(shlex.split(f"cmake --build {work_dir_local}/benchs_build"))
         subprocess.check_call(shlex.split(f"cmake --install {work_dir_local}/benchs_build"))
     benchs = pathlib.Path(f"{work_dir_local}/benchs_install").glob("**/*.elf")
@@ -128,7 +128,6 @@ def parse_path(to_parse):
             "HOME"  : os.getenv("HOME"),
             "WORK"  : work_dir_local,
             "CWD"   : base_cwd,
-            "RHOME" : remote_homedir
             }
     for holder in parses.keys():
         if to_parse.startswith(f"${holder}"):
@@ -540,6 +539,10 @@ if args.local_dir:
 else:
     work_dir_local = tempfile.mkdtemp(prefix = work_dir_prefix, dir = os.getcwd())
 
+# Prepare benchmarks
+benchs = sorted(prepare_benchs(get_config('benchmarks_folder')))
+sys.exit(1)
+
 # Local files
 results_tmp_path = os.path.join(work_dir_local, "results_tmp.json")
 results_path = os.path.join(work_dir_local, "results.json")
@@ -585,8 +588,6 @@ attacks = sorted(prepare_attacks(get_config('attacks_folder'), work_dir_remote))
 api_fns = read_apis(get_config('cheri_api_path'))
 cheribsd_ports_repo = prepare_cheribsd_ports()
 
-# Prepare benchmarks
-benchs = sorted(prepare_benchs(get_config('bench_folder'), work_dir_remote))
 
 # Environment for cross-compiling
 compile_env = {
