@@ -88,38 +88,6 @@ def make_grep_pattern_cmd(pattern, target):
 def make_cloc_cmd(path):
     return shlex.split(f"cloc --json {path}")
 
-def prepare_attacks(attacks_path, dest_path):
-    attack_sources = glob.glob(os.path.join(attacks_path, "*.c"))
-    for to_ignore in config["attacks_to_ignore"]:
-        attack_sources = [x for x in attack_sources if not to_ignore in x]
-    log_message(f"Found attacks in {attacks_path}: {attack_sources}")
-    assert(attack_sources)
-    attacks = []
-    compile_cmd = f"{os.path.join(work_dir_local, 'cheribuild', 'output', 'morello-sdk', 'bin', 'clang')} --std=c11 -Wall --config cheribsd-morello-purecap.cfg"
-    compile_cmd = shlex.split(compile_cmd)
-    for source in attack_sources:
-        attack = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
-        subprocess.run(compile_cmd + ['-o', attack, source], check = True)
-        attacks.append(attack)
-        exec_env.put_file(attack, dest_path)
-    return attacks
-
-def prepare_benchs(bench_sources):
-    assert(os.path.exists(bench_sources))
-    cmake_config_cmd = """cmake -S {source} -B {dest}/benchs/build -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_INSTALL_PREFIX={dest}/benchs/install -Dgclib=jemalloc
-        -Dbm_logfile=out.json -DSDK={sdk} -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
-    for toolchain_type in ["hybrid", "purecap"]:
-        subprocess.check_call(shlex.split(
-            cmake_config_cmd.format(source = bench_sources, dest =
-                work_dir_local, sdk =
-                os.path.join(get_config('cheribuild_folder'), "output", "morello-sdk"),
-                toolchain = f"os.path.join({bench_sources}, morello-{toolchain_type}.cmake")))
-        subprocess.check_call(shlex.split(f"cmake --build {work_dir_local}/benchs_build"))
-        subprocess.check_call(shlex.split(f"cmake --install {work_dir_local}/benchs_build"))
-    benchs = pathlib.Path(f"{work_dir_local}/benchs_install").glob("**/*.elf")
-    return benchs
-
 def get_config(to_get):
     return parse_path(config[to_get])
 
@@ -248,7 +216,9 @@ def prepare_cheri():
     else:
         log_message(f"Building new QEMU instance in {work_dir_local}")
         cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild qemu disk-image-morello-purecap")
-        subprocess.run(cmd, cwd = get_config('cheribuild_folder'))
+        subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
+        cmd = make_cheribuild_cmd("cheribsd-morello-hybrid")
+        subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
     artifact_path = os.path.join(work_dir_local, "cheribuild")
     assert(os.path.exists(os.path.join(artifact_path, "output", "sdk", "bin", "qemu-system-morello")))
     port = config['cheri_qemu_port']
@@ -290,6 +260,39 @@ def prepare_cheribsd_ports():
     else:
         repo = git.Repo(to_path)
     return repo
+
+def prepare_attacks(attacks_path, dest_path):
+    attack_sources = glob.glob(os.path.join(attacks_path, "*.c"))
+    for to_ignore in config["attacks_to_ignore"]:
+        attack_sources = [x for x in attack_sources if not to_ignore in x]
+    log_message(f"Found attacks in {attacks_path}: {attack_sources}")
+    assert(attack_sources)
+    attacks = []
+    compile_cmd = f"{os.path.join(work_dir_local, 'cheribuild', 'output', 'morello-sdk', 'bin', 'clang')} --std=c11 -Wall --config cheribsd-morello-purecap.cfg"
+    compile_cmd = shlex.split(compile_cmd)
+    for source in attack_sources:
+        attack = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
+        subprocess.run(compile_cmd + ['-o', attack, source], check = True)
+        attacks.append(attack)
+        exec_env.put_file(attack, dest_path)
+    return attacks
+
+def prepare_benchs(bench_sources):
+    assert(os.path.exists(bench_sources))
+    cmake_config_cmd = """cmake -S {source} -B {dest}/build
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
+    -Dgclib=jemalloc -Dbm_logfile=out.json -DSDK={sdk}
+    -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+    for toolchain_type in ["hybrid", "purecap"]:
+        dest = os.path.join(work_dir_local, f"benchs-{toolchain_type}")
+        subprocess.check_call(shlex.split(
+            cmake_config_cmd.format(source = bench_sources, dest = dest,
+                sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
+                toolchain = os.path.join(bench_sources, "morello-{toolchain_type}.cmake"))))
+        subprocess.check_call(shlex.split(f"cmake --build {dest}/build"))
+        subprocess.check_call(shlex.split(f"cmake --install {dest}/build"))
+    benchs = pathlib.Path(f"{dest}/install").glob("**/*.elf")
+    return benchs
 
 ################################################################################
 # Application
@@ -541,6 +544,7 @@ else:
 
 # Prepare benchmarks
 benchs = sorted(prepare_benchs(get_config('benchmarks_folder')))
+print(benchs)
 sys.exit(1)
 
 # Local files
