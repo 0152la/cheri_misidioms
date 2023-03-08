@@ -36,8 +36,8 @@ cheri_builtin_fn_call_grep_pattern = "__builtin_cheri[[:alnum:]_]\+"
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument("--alloc", type=str, action='store', required=False,
-        help="""Optional path to allocator. If not given, runs over all
-        allocators given in `config.json`.""")
+        help="""Optional path to allocator folder, containing `info.json`. If
+        not given, runs over all allocators given in `config.json`.""")
 arg_parser.add_argument("--local-dir", type=str, action='store', default=None,
         required=False, metavar="path",
         help="Where to store local data, instead of generating a folder.")
@@ -53,11 +53,15 @@ arg_parser.add_argument("--parse-data-only", action='store', default="",
         type=str, metavar="path",
         help="Parse given results file to generate LaTeX tables.")
 arg_parser.add_argument("--target-machine", action='store', default="",
-        type=str, metavar="IP",
+        type=str, metavar="address",
         help="""Address of a CHERI-enabled machine on the network to run
         experiments on instead of using a QEMU instance. Expected format is
         `user@host:port`. NOTE: This requires appropriate keys being set-up
         between the machines to communicate without further user input""")
+arg_parser.add_argument("--bench-machine", action='store', default="",
+        type=str, metavar="address",
+        help="""Similar to `target-machine`, but to be used to run only the
+        benchmarks on, not the attacks.""")
 arg_parser.add_argument("--table-context", action='store_true',
         help="""If set, will emit Latex tables with prologue and epilogue.
         Otherwise, simply generates the table content""")
@@ -100,16 +104,16 @@ def get_config(to_get):
     return parse_path(config[to_get])
 
 def parse_path(to_parse):
-    if to_parse.startswith("$HOME"):
-        to_parse = to_parse.replace("$HOME", os.getenv("HOME"))
-    elif to_parse.startswith("$WORK"):
-        to_parse = to_parse.replace("$WORK", work_dir_local)
-    elif to_parse.startswith("$CWD"):
-        to_parse = to_parse.replace("$CWD", base_cwd)
-    elif to_parse.startswith("$RHOME"):
-        to_parse = to_parse.replace("$RHOME", remote_homedir)
-    else:
-        print(f"Did not parse anything for path {to_parse}.")
+    parses = {
+            "HOME"  : os.getenv("HOME"),
+            "WORK"  : work_dir_local,
+            "CWD"   : base_cwd,
+            "RHOME" : remote_homedir
+            }
+    for holder in parses.keys():
+        if to_parse.startswith(f"${holder}"):
+            to_parse = to_parse.replace(f"${holder}", parses[holder])
+            break
     return to_parse
 
 #TODO check intersection
@@ -554,10 +558,6 @@ else:
 remote_homedir = exec_env.run_cmd("printf $HOME", check = True).stdout
 exec_env.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}", check = True)
 work_dir_remote = exec_env.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX", check = True).stdout.strip()
-# remote_homedir = subprocess.check_output(make_ssh_cmd("printf '$HOME'"), encoding = "UTF-8")
-# subprocess.run(make_ssh_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}"), check = True)
-# work_dir_remote = subprocess.check_output(make_ssh_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX"), encoding = "UTF-8")
-# work_dir_remote = work_dir_remote.strip()
 log_message(f"Set remote work directory to {work_dir_remote}")
 
 # Prepare tests and read API data
