@@ -11,6 +11,7 @@ import re
 import tempfile
 import time
 import sys
+import pathlib
 import enum
 
 from operator import itemgetter
@@ -107,12 +108,13 @@ def prepare_benchs(bench_sources, dest_path):
     assert(os.path.exists(bench_sources))
     cmake_config_cmd = """cmake -S {source} -B {dest}/benchs/build -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX={dest}/benchs/install -Dgclib=jemalloc
-        -Dbm_logfile=out.json -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+        -Dbm_logfile=out.json -DSDK={cheribuild_out} -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     for toolchain_type in ["hybrid", "purecap"]:
         subprocess.check_call(shlex.split(
-            cmake_config_cmd.format(source = bench_sources, \
-                                    dest = work_dir_local, toolchain =
-                                    f"{bench_sources}/morello-{toolchain_type}.cmake")))
+            cmake_config_cmd.format(source = bench_sources, dest =
+                work_dir_local, sdk = get_config("cheribuild_folder"),
+                toolchain =
+                f"{bench_sources}/morello-{toolchain_type}.cmake")))
         subprocess.check_call(shlex.split(f"cmake --build {work_dir_local}/benchs_build"))
         subprocess.check_call(shlex.split(f"cmake --install {work_dir_local}/benchs_build"))
     benchs = pathlib.Path(f"{work_dir_local}/benchs_install").glob("**/*.elf")
