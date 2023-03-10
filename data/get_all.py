@@ -661,8 +661,6 @@ cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare benchmarks
 benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), work_dir_remote))
-print(benchs)
-sys.exit(1)
 
 # Environment for cross-compiling
 compile_env = {
@@ -692,7 +690,12 @@ for alloc_folder in allocators:
         do_install(alloca, compile_env)
 
     # Attacks and validation
-    alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks)
+    if not args.no_run_attacks:
+        alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks)
+
+    # Benchmarks
+    if not args.no_run_benchmarks:
+        alloc_data['results'] = do_benchs(alloc, benchs)
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
