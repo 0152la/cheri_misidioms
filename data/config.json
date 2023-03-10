@@ -27,5 +27,12 @@
         "bump_alloc_lib",
         "test_bump_alloc1",
         "test_bump_alloc2"
-    ]
+    ],
+    "benchmarks_params":
+    {
+        "espresso": "largest.espresso",
+        "barnes": "< input",
+        "cfrac": "17545186520507317056371138836327483792789528",
+        "mstress": "4 50 25"
+    }
 }

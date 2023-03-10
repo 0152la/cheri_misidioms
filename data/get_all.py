@@ -11,7 +11,6 @@ import re
 import tempfile
 import time
 import sys
-import pathlib
 import enum
 
 from operator import itemgetter
@@ -66,6 +65,9 @@ arg_parser.add_argument("--bench-machine", action='store', default="",
 arg_parser.add_argument("--table-context", action='store_true',
         help="""If set, will emit Latex tables with prologue and epilogue.
         Otherwise, simply generates the table content""")
+for targets in ["attacks", "benchmarks"]:
+    arg_parser.add_argument(f"--no-run-{targets}", action='store_true',
+            help = f"If set, will skip running {targets} for the execution.")
 args = arg_parser.parse_args()
 
 ################################################################################
@@ -159,6 +161,28 @@ class InstallMode(enum.Enum):
             print(f"Wrong mode parsed: {mode}")
             assert(False)
 
+class ExecutorType(enum.Enum):
+    TIME = enum.auto()
+    PMC = enum.auto()
+
+    to_parse_time = {
+        "total_time_ms" : re.compile(r'user (\d+\.\d+)'),
+        "rss_kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
+        }
+
+    def parse_output(self, output):
+        result = {}
+        if self == ExecutorType.TIME:
+            for row in output:
+                for parse_key, parse_re in self.to_parse_time:
+                    match = parse_re.match(row)
+                    if match:
+                        assert parse_key not in result
+                        result[parse_key] = match.group()
+        if self == ExecutorType.PMG:
+            pass
+        assert False
+
 class Allocator:
     def __init__(self, folder, json_data):
         self.name = os.path.basename(folder.removesuffix('/')).replace('_', '-')
@@ -204,6 +228,21 @@ class ExecEnvironment:
 
     def put_file(self, src, dest):
         return self.conn.put(src, remote = dest)
+
+class BenchExecutor:
+    def __init__(self, cmd):
+        if cmd.startswith("time"):
+            self.type = ExecutorType.TIME
+        elif cmd.startswith("pmcstat"):
+            self.type = ExecutorType.PMC
+        else:
+            print(f"Cannot parse executor type for cmd {cmd}")
+            sys.exit(1)
+        self.cmd = cmd
+
+    def do_exec(self, target, environ, exec_env):
+        exec_res = exec_env.run_cmd(" ".join(self.cmd, target), env = environ, check = False)
+        return self.type.parse_output(exec_res.stderr)
 
 ################################################################################
 # Preparation
@@ -277,21 +316,26 @@ def prepare_attacks(attacks_path, dest_path):
         exec_env.put_file(attack, dest_path)
     return attacks
 
-def prepare_benchs(bench_sources):
+def prepare_benchs(bench_sources, dest_path):
     assert(os.path.exists(bench_sources))
     cmake_config_cmd = """cmake -S {source} -B {dest}/build
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
     -Dgclib=jemalloc -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+    benchs = []
     for toolchain_type in ["hybrid", "purecap"]:
         dest = os.path.join(work_dir_local, f"benchs-{toolchain_type}")
         subprocess.check_call(shlex.split(
             cmake_config_cmd.format(source = bench_sources, dest = dest,
                 sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
-                toolchain = os.path.join(bench_sources, "morello-{toolchain_type}.cmake"))))
+                toolchain = os.path.join(bench_sources, f"morello-{toolchain_type}.cmake"))))
         subprocess.check_call(shlex.split(f"cmake --build {dest}/build"))
         subprocess.check_call(shlex.split(f"cmake --install {dest}/build"))
-    benchs = pathlib.Path(f"{dest}/install").glob("**/*.elf")
+        for _, _, new_bench_files in os.walk(dest):
+            for file in new_bench_files:
+                if file.endswith(".elf"):
+                    benchs.append(file)
+                exec_env.put_file(file, dest_path)
     return benchs
 
 ################################################################################
@@ -347,9 +391,7 @@ def do_attacks(alloca, attacks):
     results = {}
     for attack in attacks:
         cmd = os.path.join(work_dir_remote, os.path.basename(attack))
-        print(f"- Running attack {cmd}")
         remote_env = {}
-        print(f"-- with `LD_PRELOAD` at {alloca.remote_lib_path}")
         remote_env = { 'LD_PRELOAD' : alloca.remote_lib_path }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
@@ -363,6 +405,36 @@ def do_attacks(alloca, attacks):
         results[attack]['stderr'] = attack_res.stderr
         results[attack]['time'] = runtime
     return results, validated
+
+def do_benchs(alloca, benchs):
+    if alloca.no_benchs:
+        return {}
+    results = {}
+    wrappers = ["time -p -l"]
+    pmc_timeout = 1200
+    pmc_events = [ 'L1D_CACHE', 'L1I_CACHE', 'L2D_CACHE', 'CPU_CYCLES',
+                   'INST_RETIRED', 'MEM_ACCESS', 'BUS_ACCESS',
+                   'BUS_ACCESS_RD_CTAG' ]
+    pmc_events = [ f"-p {event}" for event in pmc_events ]
+    wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
+    executors = [BenchExecutor(x) for x in wrappers]
+    mode_environs = {
+            "hybrid"  : "LD_64_PRELOAD",
+            "purecap" : "LD_PRELOAD",
+            }
+    iteration_count = 1
+    for mode, environ_var in mode_environs.items():
+        results[mode] = {}
+        for bench in benchs:
+            results[mode][bench] = {}
+            cmd = os.path.join(work_dir_remote, os.path.basename(bench))
+            cmd = " ".join(cmd, get_config["benchmarks_params"].get(bench.splitext()[0], "")).strip()
+            remote_env = { environ_var : alloca.remote_lib_path }
+            for it in range(iteration_count):
+                for executor in executors:
+                    log_message(f"== RUN {cmd} ({it} / {iteration_count}) WITH ENV {remote_env}")
+                    results[mode][bench].update(executor.do_exec(bench, remote_env, exec_env))
+    return results
 
 def get_source_data(alloca):
     source_data = {}
@@ -542,11 +614,6 @@ if args.local_dir:
 else:
     work_dir_local = tempfile.mkdtemp(prefix = work_dir_prefix, dir = os.getcwd())
 
-# Prepare benchmarks
-benchs = sorted(prepare_benchs(get_config('benchmarks_folder')))
-print(benchs)
-sys.exit(1)
-
 # Local files
 results_tmp_path = os.path.join(work_dir_local, "results_tmp.json")
 results_path = os.path.join(work_dir_local, "results.json")
@@ -592,6 +659,10 @@ attacks = sorted(prepare_attacks(get_config('attacks_folder'), work_dir_remote))
 api_fns = read_apis(get_config('cheri_api_path'))
 cheribsd_ports_repo = prepare_cheribsd_ports()
 
+# Prepare benchmarks
+benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), work_dir_remote))
+print(benchs)
+sys.exit(1)
 
 # Environment for cross-compiling
 compile_env = {
