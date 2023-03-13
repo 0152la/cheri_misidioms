@@ -91,18 +91,24 @@ def make_cloc_cmd(path):
     return shlex.split(f"cloc --json {path}")
 
 def get_config(to_get):
-    return parse_path(config[to_get])
+    gotten = config[to_get]
+    if isinstance(gotten, str):
+        return parse_path(gotten)
+    else:
+        return gotten
 
 def parse_path(to_parse):
     parses = {
             "HOME"  : os.getenv("HOME"),
             "WORK"  : work_dir_local,
             "CWD"   : base_cwd,
+            "RHOME" : remote_homedir,
             }
     for holder in parses.keys():
         if to_parse.startswith(f"${holder}"):
             to_parse = to_parse.replace(f"${holder}", parses[holder])
             break
+    assert('$' not in to_parse)
     return to_parse
 
 #TODO check intersection
@@ -161,25 +167,27 @@ class InstallMode(enum.Enum):
             print(f"Wrong mode parsed: {mode}")
             assert(False)
 
+to_parse_time = {
+    "total_time_ms" : re.compile(r'user (\d+\.\d+)'),
+    "rss_kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
+    }
+
 class ExecutorType(enum.Enum):
     TIME = enum.auto()
     PMC = enum.auto()
 
-    to_parse_time = {
-        "total_time_ms" : re.compile(r'user (\d+\.\d+)'),
-        "rss_kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
-        }
-
     def parse_output(self, output):
         result = {}
         if self == ExecutorType.TIME:
-            for row in output:
-                for parse_key, parse_re in self.to_parse_time:
+            for row in output.splitlines():
+                for parse_key, parse_re in to_parse_time.items():
                     match = parse_re.match(row)
                     if match:
                         assert parse_key not in result
-                        result[parse_key] = match.group()
-        if self == ExecutorType.PMG:
+                        result[parse_key] = match.group(1)
+            assert(len(result) == len(to_parse_time))
+            return result
+        elif self == ExecutorType.PMC:
             pass
         assert False
 
@@ -205,6 +213,7 @@ class Allocator:
             self.lib_file = os.path.join(self.source_path, self.lib_file)
         self.version = self.install_mode.parse_version(json_data['install'])
         self.no_attacks = False if not "no_attacks" in json_data else json_data['no_attacks']
+        self.no_benchs  = False if not "no_benchs"  in json_data else json_data['no_benchs']
         self.raw_data = json_data
 
     def get_build_file_path(self):
@@ -224,7 +233,8 @@ class ExecEnvironment:
         return self.run_cmd(f"pkg64c install -y {alloc}-{version}", check = True)
 
     def run_cmd(self, cmd, env = {}, check = False):
-        return self.conn.run(cmd, env = env, warn = not check)
+        with open(os.devnull, 'w') as devnull_fd:
+            return self.conn.run(cmd, env = env, warn = not check, out_stream = devnull_fd)
 
     def put_file(self, src, dest):
         return self.conn.put(src, remote = dest)
@@ -240,8 +250,10 @@ class BenchExecutor:
             sys.exit(1)
         self.cmd = cmd
 
-    def do_exec(self, target, environ, exec_env):
-        exec_res = exec_env.run_cmd(" ".join(self.cmd, target), env = environ, check = False)
+    def do_exec(self, target, remote_dir, environ, exec_env):
+        cmd = f"cd {remote_dir} ; {self.cmd} {target}"
+        log_message(f" - {cmd}")
+        exec_res = exec_env.run_cmd(cmd, env = environ, check = False)
         return self.type.parse_output(exec_res.stderr)
 
 ################################################################################
@@ -323,7 +335,7 @@ def prepare_benchs(bench_sources, dest_path):
     -Dgclib=jemalloc -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     benchs = []
-    for toolchain_type in ["hybrid", "purecap"]:
+    for toolchain_type in ["purecap"]:
         dest = os.path.join(work_dir_local, f"benchs-{toolchain_type}")
         subprocess.check_call(shlex.split(
             cmake_config_cmd.format(source = bench_sources, dest = dest,
@@ -331,11 +343,12 @@ def prepare_benchs(bench_sources, dest_path):
                 toolchain = os.path.join(bench_sources, f"morello-{toolchain_type}.cmake"))))
         subprocess.check_call(shlex.split(f"cmake --build {dest}/build"))
         subprocess.check_call(shlex.split(f"cmake --install {dest}/build"))
-        for _, _, new_bench_files in os.walk(dest):
-            for file in new_bench_files:
-                if file.endswith(".elf"):
-                    benchs.append(file)
-                exec_env.put_file(file, dest_path)
+        print(dest)
+        for dir_path, _, new_bench_files in os.walk(dest):
+            for filn in new_bench_files:
+                if filn.endswith(".elf"):
+                    benchs.append(filn)
+                exec_env.put_file(os.path.join(dir_path, filn), dest_path)
     return benchs
 
 ################################################################################
@@ -427,13 +440,12 @@ def do_benchs(alloca, benchs):
         results[mode] = {}
         for bench in benchs:
             results[mode][bench] = {}
-            cmd = os.path.join(work_dir_remote, os.path.basename(bench))
-            cmd = " ".join(cmd, get_config["benchmarks_params"].get(bench.splitext()[0], "")).strip()
+            bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
             remote_env = { environ_var : alloca.remote_lib_path }
             for it in range(iteration_count):
                 for executor in executors:
-                    log_message(f"== RUN {cmd} ({it} / {iteration_count}) WITH ENV {remote_env}")
-                    results[mode][bench].update(executor.do_exec(bench, remote_env, exec_env))
+                    log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
+                    results[mode][bench].update(executor.do_exec(bench_cmd, work_dir_remote, remote_env, exec_env))
     return results
 
 def get_source_data(alloca):
@@ -695,7 +707,7 @@ for alloc_folder in allocators:
 
     # Benchmarks
     if not args.no_run_benchmarks:
-        alloc_data['results'] = do_benchs(alloc, benchs)
+        alloc_data['results'] = do_benchs(alloca, benchs)
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
