@@ -30,6 +30,9 @@ cheri_builtin_fn_pattern = "__builtin_cheri[a-zA-Z0-9_]+"
 cheri_builtin_fn_grep_pattern = "BUILTIN(__builtin_cheri[[:alnum:]_]\+"
 cheri_builtin_fn_call_grep_pattern = "__builtin_cheri[[:alnum:]_]\+"
 
+execution_targets = {"attacks" : None, "benchmarks" : None}
+benchmarks_modes = ["purecap"]
+
 ################################################################################
 # Arguments
 ################################################################################
@@ -52,12 +55,6 @@ arg_parser.add_argument("--no-wait-qemu", action="store_true",
 arg_parser.add_argument("--parse-data-only", action='store', default="",
         type=str, metavar="path",
         help="Parse given results file to generate LaTeX tables.")
-arg_parser.add_argument("--target-machine", action='store', default="",
-        type=str, metavar="address",
-        help="""Address of a CHERI-enabled machine on the network to run
-        experiments on instead of using a QEMU instance. Expected format is
-        `user@host:port`. NOTE: This requires appropriate keys being set-up
-        between the machines to communicate without further user input""")
 arg_parser.add_argument("--bench-machine", action='store', default="",
         type=str, metavar="address",
         help="""Similar to `target-machine`, but to be used to run only the
@@ -65,7 +62,11 @@ arg_parser.add_argument("--bench-machine", action='store', default="",
 arg_parser.add_argument("--table-context", action='store_true',
         help="""If set, will emit Latex tables with prologue and epilogue.
         Otherwise, simply generates the table content""")
-for targets in ["attacks", "benchmarks"]:
+for targets in execution_targets:
+    arg_parser.add_argument(f"--{targets}-machine", action='store', default="",
+            type=str, metavar="address",
+            help=f"""Address (`user@host:port`) of a CHERI-enabled machine to run
+            {targets} on. If none given, uses a QEMU instance.""")
     arg_parser.add_argument(f"--no-run-{targets}", action='store_true',
             help = f"If set, will skip running {targets} for the execution.")
 args = arg_parser.parse_args()
@@ -90,19 +91,19 @@ def make_grep_pattern_cmd(pattern, target):
 def make_cloc_cmd(path):
     return shlex.split(f"cloc --json {path}")
 
-def get_config(to_get):
+def get_config(to_get, machine = None):
     gotten = config[to_get]
     if isinstance(gotten, str):
         return parse_path(gotten)
     else:
         return gotten
 
-def parse_path(to_parse):
+def parse_path(to_parse, machine = None):
     parses = {
             "HOME"  : os.getenv("HOME"),
             "WORK"  : work_dir_local,
             "CWD"   : base_cwd,
-            "RHOME" : remote_homedir,
+            "RHOME" : machine.rhome,
             }
     for holder in parses.keys():
         if to_parse.startswith(f"${holder}"):
@@ -200,15 +201,12 @@ class Allocator:
         self.lib_file = parse_path(json_data['install']['lib_file'])
         if self.install_mode == InstallMode.PKG:
             # self.source_path =
-            self.remote_lib_path = json_data['install']['lib_file']
             self.cheribsd_ports_path = json_data['cheribsd_ports_path']
             self.cheribsd_ports_commit = json_data['commit']
         elif self.install_mode == InstallMode.CHERIBUILD:
             self.source_path = parse_path(json_data['install']['source'])
-            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(self.lib_file))
         elif self.install_mode == InstallMode.REPO:
             self.source_path = os.path.join(base_cwd, self.name)
-            self.remote_lib_path = os.path.join(work_dir_remote, os.path.basename(self.lib_file))
         if not os.path.isabs(self.lib_file):
             self.lib_file = os.path.join(self.source_path, self.lib_file)
         self.version = self.install_mode.parse_version(json_data['install'])
@@ -220,6 +218,9 @@ class Allocator:
         print(self.info_folder)
         return os.path.join(self.info_folder, self.raw_data['install']['build_file'])
 
+    def get_remote_lib_path(self, machine):
+        return os.path.join(machine.work_dir, os.path.basename(self.lib_file))
+
 class ExecEnvironment:
     def __init__(self, addr):
         addr_regex = "(\w+)@([\w\.]+):(\d+)"
@@ -230,7 +231,10 @@ class ExecEnvironment:
         self.conn.close()
 
     def install_alloc(self, alloc, version):
-        return self.run_cmd(f"pkg64c install -y {alloc}-{version}", check = True)
+        if self.user == "root":
+            self.run_cmd(f"pkg64c install -y {alloc}-{version}", check = True)
+        else:
+            assert(self.run_cmd(f"pkg64c info {alloc}-{version}").exited == 0)
 
     def run_cmd(self, cmd, env = {}, check = False):
         with open(os.devnull, 'w') as devnull_fd:
@@ -238,6 +242,12 @@ class ExecEnvironment:
 
     def put_file(self, src, dest):
         return self.conn.put(src, remote = dest)
+
+    def set_rhome(self, path):
+        self.rhome = path
+
+    def set_work_dir(self, path):
+        self.work_dir = path
 
 class BenchExecutor:
     def __init__(self, cmd):
@@ -250,10 +260,10 @@ class BenchExecutor:
             sys.exit(1)
         self.cmd = cmd
 
-    def do_exec(self, target, remote_dir, environ, exec_env):
-        cmd = f"cd {remote_dir} ; {self.cmd} {target}"
+    def do_exec(self, target, environ, machine):
+        cmd = f"cd {machine.work_dir} ; {self.cmd} {target}"
         log_message(f" - {cmd}")
-        exec_res = exec_env.run_cmd(cmd, env = environ, check = False)
+        exec_res = machine.run_cmd(cmd, env = environ, check = False)
         return self.type.parse_output(exec_res.stderr)
 
 ################################################################################
@@ -312,7 +322,7 @@ def prepare_cheribsd_ports():
         repo = git.Repo(to_path)
     return repo
 
-def prepare_attacks(attacks_path, dest_path):
+def prepare_attacks(attacks_path, machine):
     attack_sources = glob.glob(os.path.join(attacks_path, "*.c"))
     for to_ignore in config["attacks_to_ignore"]:
         attack_sources = [x for x in attack_sources if not to_ignore in x]
@@ -325,10 +335,10 @@ def prepare_attacks(attacks_path, dest_path):
         attack = os.path.join(work_dir_local, os.path.splitext(os.path.basename(source))[0])
         subprocess.run(compile_cmd + ['-o', attack, source], check = True)
         attacks.append(attack)
-        exec_env.put_file(attack, dest_path)
+        machine.put_file(attack, machine.work_dir)
     return attacks
 
-def prepare_benchs(bench_sources, dest_path):
+def prepare_benchs(bench_sources, machine):
     assert(os.path.exists(bench_sources))
     cmake_config_cmd = """cmake -S {source} -B {dest}/build
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
@@ -348,7 +358,7 @@ def prepare_benchs(bench_sources, dest_path):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
                     benchs.append(filn)
-                exec_env.put_file(os.path.join(dir_path, filn), dest_path)
+                machine.put_file(os.path.join(dir_path, filn), machine.work_dir)
     return benchs
 
 ################################################################################
@@ -379,16 +389,15 @@ def do_install(alloca, compile_env):
         os.chdir(get_config('cheribuild_folder'))
         subprocess.run(make_cheribuild_cmd(alloca.install_target, "-c"), stdout = None)
         os.chdir(base_cwd)
-        exec_env.put_file(alloca.lib_file, work_dir_remote)
+        for machine in execution_targets.values():
+            machine.put_file(alloca.lib_file, machine.work_dir)
     elif alloca.install_mode == InstallMode.REPO:
         subprocess.run([alloca.get_build_file_path(), work_dir_local], env = compile_env, cwd = alloca.source_path)
-        exec_env.put_file(alloca.lib_file, work_dir_remote)
+        for machine in execution_targets.values():
+            machine.put_file(alloca.lib_file, machine.work_dir)
     elif alloca.install_mode == InstallMode.PKG:
-        if args.target_machine:
-            check_cmd = exec_env.run_cmd(f"pkg64c info {alloca.install_target}")
-            return check_cmd.returncode == 0
-        else:
-            exec_env.install_alloc(alloca.install_target, alloca.version)
+        for machine in execution_targets.values():
+            machine.install_alloc(alloca.install_target, alloca.version)
 
 def do_line_count(source_path):
     cloc_data = json.loads(subprocess.check_output(make_cloc_cmd(source_path), encoding = 'UTF-8'))
@@ -398,17 +407,17 @@ def do_cheri_line_count(alloc_path):
     data = subprocess.check_output([get_config('data_get_script_path'), "cheri-line-count", alloc_path], encoding = 'UTF-8')
     return int(re.search(cheri_lines_pattern, data).group(1))
 
-def do_attacks(alloca, attacks):
+def do_attacks(alloca, attacks, machine):
     if alloca.no_attacks:
         return {}, False
     results = {}
     for attack in attacks:
-        cmd = os.path.join(work_dir_remote, os.path.basename(attack))
+        cmd = os.path.join(machine.work_dir, os.path.basename(attack))
         remote_env = {}
-        remote_env = { 'LD_PRELOAD' : alloca.remote_lib_path }
+        remote_env = { 'LD_PRELOAD' : alloca.get_remote_lib_path(machine) }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
-        attack_res = exec_env.run_cmd(cmd, env = remote_env, check = False)
+        attack_res = machine.run_cmd(cmd, env = remote_env, check = False)
         runtime = time.perf_counter_ns() - start_time
         if "validate" in attack:
             validated = attack_res.exited == 0
@@ -419,7 +428,7 @@ def do_attacks(alloca, attacks):
         results[attack]['time'] = runtime
     return results, validated
 
-def do_benchs(alloca, benchs):
+def do_benchs(alloca, benchs, machine):
     if alloca.no_benchs:
         return {}
     results = {}
@@ -441,11 +450,11 @@ def do_benchs(alloca, benchs):
         for bench in benchs:
             results[mode][bench] = {}
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
-            remote_env = { environ_var : alloca.remote_lib_path }
+            remote_env = { environ_var : alloca.get_remote_lib_path(machine) }
             for it in range(iteration_count):
                 for executor in executors:
                     log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
-                    results[mode][bench].update(executor.do_exec(bench_cmd, work_dir_remote, remote_env, exec_env))
+                    results[mode][bench].update(executor.do_exec(bench_cmd, remote_env, machine))
     return results
 
 def get_source_data(alloca):
@@ -650,29 +659,38 @@ if os.path.exists(symlink_name):
 os.symlink(work_dir_local, symlink_name)
 
 # Build and run new CHERI QEMU instance
-exec_env = None
-if args.target_machine:
-    exec_env = ExecEnvironment(args.target_machine)
-else:
-    qemu_child = prepare_cheri()
-    if not qemu_child:
-        log_message("Unable to build or run QEMU instance; exiting...")
-        sys.exit(1)
-    exec_env = ExecEnvironment("root@localhost:10086")
+qemu_proc = None
+for targets in execution_targets.copy().items():
+    if vars(args[f"--no-run-{targets}"]):
+        assert(not vars(args[f"--{targets}-machine"]))
+        del execution_targets[targets]
+        continue
+    if vars(args[f"--{targets}-machine"]):
+        execution_targets[targets] = ExecEnvironment(vars(args[f"--{targets}-machine"]))
+    else:
+        if not qemu_proc:
+            qemu_proc = prepare_cheri()
+            if not qemu_proc:
+                log_message("Unable to build or run QEMU instance; exiting...")
+                sys.exit(1)
+        execution_targets[targets] = ExecEnvironment("root@localhost:10086")
+assert(execution_targets)
 
 # Prepare remote work directories
-remote_homedir = exec_env.run_cmd("printf $HOME", check = True).stdout
-exec_env.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder')}", check = True)
-work_dir_remote = exec_env.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder')}/{work_dir_prefix}XXX", check = True).stdout.strip()
-log_message(f"Set remote work directory to {work_dir_remote}")
+for machine in execution_targets.values():
+    machine.set_rhome(machine.run_cmd("printf $HOME", check = True).stdout)
+    machine.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder', machine)}", check = True)
+    machine.work_dir = machine.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder', machine)}/{work_dir_prefix}XXX", check = True).stdout.strip()
 
 # Prepare attacks and read API data
-attacks = sorted(prepare_attacks(get_config('attacks_folder'), work_dir_remote))
-api_fns = read_apis(get_config('cheri_api_path'))
-cheribsd_ports_repo = prepare_cheribsd_ports()
+if not args.no_run_attacks:
+    attacks = sorted(prepare_attacks(get_config('attacks_folder'), execution_targets["attacks"]))
+    api_fns = read_apis(get_config('cheri_api_path'))
+    cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare benchmarks
-benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), work_dir_remote))
+if not args.no_run_benchmarks:
+    benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]))
 
 # Environment for cross-compiling
 compile_env = {
@@ -698,16 +716,15 @@ for alloc_folder in allocators:
     do_source(alloca)
 
     # Install
-    if not alloca.no_attacks:
-        do_install(alloca, compile_env)
+    do_install(alloca, compile_env)
 
     # Attacks and validation
     if not args.no_run_attacks:
-        alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks)
+        alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks, execution_targets["attacks"])
 
     # Benchmarks
     if not args.no_run_benchmarks:
-        alloc_data['results'] = do_benchs(alloca, benchs)
+        alloc_data['results'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
@@ -722,8 +739,8 @@ for alloc_folder in allocators:
     log_message(f"=== DONE {alloc_folder}")
 
 # Terminate QEMU instance
-if not args.target_machine:
-    qemu_child.kill()
+if qemu_proc:
+    qemu_proc.kill()
 
 os.rename(results_tmp_path, results_path)
 do_all_tables(results)
