@@ -94,20 +94,20 @@ def make_cloc_cmd(path):
 def get_config(to_get, machine = None):
     gotten = config[to_get]
     if isinstance(gotten, str):
-        return parse_path(gotten)
+        return parse_path(gotten, machine)
     else:
         return gotten
 
 def parse_path(to_parse, machine = None):
     parses = {
-            "HOME"  : os.getenv("HOME"),
-            "WORK"  : work_dir_local,
-            "CWD"   : base_cwd,
-            "RHOME" : machine.rhome,
+            "HOME"  : 'os.getenv("HOME")',
+            "WORK"  : 'work_dir_local',
+            "CWD"   : 'base_cwd',
+            "RHOME" : 'machine.rhome',
             }
     for holder in parses.keys():
         if to_parse.startswith(f"${holder}"):
-            to_parse = to_parse.replace(f"${holder}", parses[holder])
+            to_parse = to_parse.replace(f"${holder}", eval(parses[holder]))
             break
     assert('$' not in to_parse)
     return to_parse
@@ -272,6 +272,7 @@ class BenchExecutor:
 # Preparation
 ################################################################################
 
+# TODO split
 def prepare_cheri():
     if args.no_build_cheri:
         assert(args.local_dir)
@@ -353,10 +354,9 @@ def prepare_benchs(bench_sources, machine):
             cmake_config_cmd.format(source = bench_sources, dest = dest,
                 sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
                 toolchain = os.path.join(bench_sources, f"morello-{toolchain_type}.cmake"))))
-        subprocess.check_call(shlex.split(f"cmake --build {dest}/build"))
-        subprocess.check_call(shlex.split(f"cmake --install {dest}/build"))
-        print(dest)
-        for dir_path, _, new_bench_files in os.walk(dest):
+        subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
+        subprocess.check_call(shlex.split(f"cmake --install {os.path.join(dest, 'build')}"))
+        for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
                     benchs.append(filn)
@@ -662,20 +662,22 @@ os.symlink(work_dir_local, symlink_name)
 
 # Build and run new CHERI QEMU instance
 qemu_proc = None
-for targets in execution_targets.copy().items():
-    if vars(args[f"--no-run-{targets}"]):
-        assert(not vars(args[f"--{targets}-machine"]))
+qemu_env = None
+for targets in execution_targets.copy():
+    if f"no_run_{targets}" in vars(args) and vars(args)[f"no_run_{targets}"]:
+        assert(not f"{targets}_machine" in vars(args) or not vars(args)[f"{targets}_machine"])
         del execution_targets[targets]
         continue
-    if vars(args[f"--{targets}-machine"]):
-        execution_targets[targets] = ExecEnvironment(vars(args[f"--{targets}-machine"]))
+    if f"{targets}_machine" in vars(args) and vars(args)[f"{targets}_machine"]:
+        execution_targets[targets] = ExecEnvironment(vars(args)[f"{targets}_machine"])
     else:
-        if not qemu_proc:
+        if not qemu_env:
             qemu_proc = prepare_cheri()
             if not qemu_proc:
                 log_message("Unable to build or run QEMU instance; exiting...")
                 sys.exit(1)
-        execution_targets[targets] = ExecEnvironment("root@localhost:10086")
+            qemu_env = ExecEnvironment("root@localhost:10086")
+        execution_targets[targets] = qemu_env
 assert(execution_targets)
 
 # Prepare remote work directories
