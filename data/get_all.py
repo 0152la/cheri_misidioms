@@ -189,9 +189,9 @@ class ExecutorType(enum.Enum):
             assert(len(result) == len(to_parse_time))
             return result
         elif self == ExecutorType.PMC:
-            counters = output.splitlines()[0].split("p/").strip()[1:]
+            counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
             values = output.splitlines()[1].split()
-            return zip(counters, values, strict = True)
+            return dict(zip(counters, values, strict = True))
         assert False
 
 class Allocator:
