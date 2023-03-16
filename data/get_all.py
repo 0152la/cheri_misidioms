@@ -33,6 +33,15 @@ cheri_builtin_fn_call_grep_pattern = "__builtin_cheri[[:alnum:]_]\+"
 execution_targets = {"attacks" : None, "benchmarks" : None}
 benchmarks_modes = ["purecap"]
 
+pmc_events_names = [ 'L1D_CACHE', 'L1I_CACHE', 'L2D_CACHE', 'CPU_CYCLES',
+                     'INST_RETIRED', 'MEM_ACCESS', 'BUS_ACCESS',
+                     'BUS_ACCESS_RD_CTAG' ]
+
+mode_environs = {
+        "hybrid"  : "LD_64_PRELOAD",
+        "purecap" : "LD_PRELOAD",
+        }
+
 ################################################################################
 # Arguments
 ################################################################################
@@ -177,10 +186,12 @@ class ExecutorType(enum.Enum):
     TIME = enum.auto()
     PMC = enum.auto()
 
-    def parse_output(self, output):
+    def parse_output(self, exec_res):
         result = {}
         if self == ExecutorType.TIME:
-            for row in output.splitlines():
+            if exec_res.exited != 0:
+                return { k : 0.0 for k in to_parse_time.keys() }
+            for row in exec_res.stderr.splitlines():
                 for parse_key, parse_re in to_parse_time.items():
                     match = parse_re.match(row)
                     if match:
@@ -189,10 +200,14 @@ class ExecutorType(enum.Enum):
             assert(len(result) == len(to_parse_time))
             return result
         elif self == ExecutorType.PMC:
+            if exec_res.exited != 0:
+                return { k : 0 for k in pmc_events_names }
+            output = exec_res.stderr
             counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
             values = output.splitlines()[1].split()
             return dict(zip(counters, values, strict = True))
-        assert False
+        else:
+            assert False
 
 class Allocator:
     def __init__(self, folder, json_data):
@@ -266,7 +281,7 @@ class BenchExecutor:
         cmd = f"cd {machine.work_dir} ; {self.cmd} {target}"
         log_message(f" - {cmd}")
         exec_res = machine.run_cmd(cmd, env = environ, check = False)
-        return self.type.parse_output(exec_res.stderr)
+        return self.type.parse_output(exec_res)
 
 ################################################################################
 # Preparation
@@ -436,27 +451,26 @@ def do_benchs(alloca, benchs, machine):
     results = {}
     wrappers = ["time -p -l"]
     pmc_timeout = 1200
-    pmc_events = [ 'L1D_CACHE', 'L1I_CACHE', 'L2D_CACHE', 'CPU_CYCLES',
-                   'INST_RETIRED', 'MEM_ACCESS', 'BUS_ACCESS',
-                   'BUS_ACCESS_RD_CTAG' ]
-    pmc_events = [ f"-p {event}" for event in pmc_events ]
+    pmc_events = [ f"-p {event}" for event in pmc_events_names ]
     wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
     executors = [BenchExecutor(x) for x in wrappers]
-    mode_environs = {
-            "hybrid"  : "LD_64_PRELOAD",
-            "purecap" : "LD_PRELOAD",
-            }
     iteration_count = 1
     for mode, environ_var in mode_environs.items():
         results[mode] = {}
         for bench in benchs:
             results[mode][bench] = {}
+            for time_entries in to_parse_time:
+                results[mode][bench][time_entries] = []
+            for pmc_event in pmc_events_names:
+                results[mode][bench][pmc_event] = []
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
             remote_env = { environ_var : alloca.get_remote_lib_path(machine) }
             for it in range(iteration_count):
+                it_result = {}
                 for executor in executors:
                     log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
-                    results[mode][bench].update(executor.do_exec(bench_cmd, remote_env, machine))
+                    it_result.update(executor.do_exec(bench_cmd, remote_env, machine))
+                results[mode][bench] = {k : v.append(it_result[k]) for k,v in results[mode][bench].items()}
     return results
 
 def get_source_data(alloca):
