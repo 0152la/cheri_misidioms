@@ -196,7 +196,7 @@ class ExecutorType(enum.Enum):
                     match = parse_re.match(row)
                     if match:
                         assert parse_key not in result
-                        result[parse_key] = match.group(1)
+                        result[parse_key] = float(match.group(1))
             assert(len(result) == len(to_parse_time))
             return result
         elif self == ExecutorType.PMC:
@@ -204,7 +204,7 @@ class ExecutorType(enum.Enum):
                 return { k : 0 for k in pmc_events_names }
             output = exec_res.stderr
             counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
-            values = output.splitlines()[1].split()
+            values = map(int, output.splitlines()[1].split())
             return dict(zip(counters, values, strict = True))
         else:
             assert False
@@ -454,7 +454,7 @@ def do_benchs(alloca, benchs, machine):
     pmc_events = [ f"-p {event}" for event in pmc_events_names ]
     wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
     executors = [BenchExecutor(x) for x in wrappers]
-    iteration_count = 1
+    iteration_count = 3
     for mode, environ_var in mode_environs.items():
         results[mode] = {}
         for bench in benchs:
@@ -470,7 +470,7 @@ def do_benchs(alloca, benchs, machine):
                 for executor in executors:
                     log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
                     it_result.update(executor.do_exec(bench_cmd, remote_env, machine))
-                results[mode][bench] = {k : v.append(it_result[k]) for k,v in results[mode][bench].items()}
+                results[mode][bench] = {k : v + [it_result[k]] for k,v in results[mode][bench].items()}
     return results
 
 def get_source_data(alloca):
