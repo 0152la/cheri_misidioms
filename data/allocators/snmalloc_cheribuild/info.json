@@ -7,6 +7,7 @@
         "commit": "888d182baccb3288e41172fec3e0501158418613",
         "lib_file": "$WORK/cheribuild/build/snmalloc-morello-purecap-build/libsnmallocshim.so"
     },
+    "no_benchs": true,
     "file": "pycheribuild/projects/cross/snmalloc.py",
     "repo": "https://github.com/nwf/snmalloc",
     "commit": "888d182baccb3288e41172fec3e0501158418613",

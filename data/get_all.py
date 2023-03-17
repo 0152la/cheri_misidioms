@@ -31,15 +31,22 @@ cheri_builtin_fn_grep_pattern = "BUILTIN(__builtin_cheri[[:alnum:]_]\+"
 cheri_builtin_fn_call_grep_pattern = "__builtin_cheri[[:alnum:]_]\+"
 
 execution_targets = {"attacks" : None, "benchmarks" : None}
-benchmarks_modes = ["purecap"]
 
 pmc_events_names = [ 'L1D_CACHE', 'L1I_CACHE', 'L2D_CACHE', 'CPU_CYCLES',
                      'INST_RETIRED', 'MEM_ACCESS', 'BUS_ACCESS',
                      'BUS_ACCESS_RD_CTAG' ]
 
-mode_environs = {
-        "hybrid"  : "LD_64_PRELOAD",
-        "purecap" : "LD_PRELOAD",
+benchmark_modes = {
+        "purecap": {
+            "environ" : "LD_PRELOAD",
+            "cflags" : "--config cheribsd-morello-purecap",
+            "pkg_manager": "pkg64c",
+            },
+        "hybrid":  {
+            "environ" : "LD_64_PRELOAD",
+            "cflags" : "--config cheribsd-morello-hybrid",
+            "pkg_manager": "pkg64",
+            },
         }
 
 ################################################################################
@@ -235,8 +242,52 @@ class Allocator:
         print(self.info_folder)
         return os.path.join(self.info_folder, self.raw_data['install']['build_file'])
 
-    def get_remote_lib_path(self, machine):
-        return os.path.join(machine.work_dir, os.path.basename(self.lib_file))
+    def get_remote_lib_path(self, machine, mode):
+        return os.path.join(machine.get_work_dir(mode), os.path.basename(self.lib_file))
+
+    def do_source(self):
+        if self.install_mode == InstallMode.CHERIBUILD:
+            os.chdir(get_config('cheribuild_folder'))
+            subprocess.run(
+                make_cheribuild_cmd(self.install_target, "--configure-only"),
+                stdout = None)
+            repo = git.Repo(path = subprocess.check_output(
+                shlex.split("git rev-parse --show-toplevel"),
+                cwd = self.source_path, encoding = 'UTF-8').strip())
+            repo.git.fetch("origin", self.version)
+            repo.git.checkout(self.version)
+            os.chdir(base_cwd)
+        elif self.install_mode == InstallMode.REPO:
+            if not os.path.exists(self.source_path):
+                repo = git.Repo.clone_from(
+                        url = self.install_target, to_path = self.source_path)
+            else:
+                repo = git.Repo(self.source_path)
+            repo.git.fetch("origin", self.version)
+            repo.git.checkout(self.version)
+        elif self.install_mode == InstallMode.PKG:
+            # TODO
+            pass
+
+    def do_install(self, compile_env):
+        to_install = benchmark_modes.keys() if not self.no_benchs else ["purecap"]
+        for mode in to_install:
+            compile_env["CFLAGS"]   = benchmark_modes[mode]["cflags"]
+            compile_env["CXXFLAGS"] = benchmark_modes[mode]["cflags"]
+            if self.install_mode == InstallMode.CHERIBUILD:
+                os.chdir(get_config('cheribuild_folder'))
+                # TODO modes
+                subprocess.run(make_cheribuild_cmd(self.install_target, "-c"), stdout = None)
+                os.chdir(base_cwd)
+                for machine in execution_targets.values():
+                    machine.put_file(self.lib_file, machine.get_work_dir(mode))
+            elif self.install_mode == InstallMode.REPO:
+                subprocess.run([self.get_build_file_path(), work_dir_local], env = compile_env, cwd = self.source_path)
+                for machine in execution_targets.values():
+                    machine.put_file(self.lib_file, machine.get_work_dir(mode))
+            elif self.install_mode == InstallMode.PKG:
+                for machine in execution_targets.values():
+                    machine.install_alloc(self.install_target, self.version, mode)
 
 class ExecEnvironment:
     def __init__(self, addr):
@@ -247,11 +298,12 @@ class ExecEnvironment:
     def __del__(self):
         self.conn.close()
 
-    def install_alloc(self, alloc, version):
+    def install_alloc(self, alloc, version, mode):
+        pkg = benchmark_modes[mode]["pkg_manager"]
         if self.user == "root":
-            self.run_cmd(f"pkg64c install -y {alloc}-{version}", check = True)
+            self.run_cmd(f"{pkg} install -y {alloc}-{version}", check = True)
         else:
-            assert(self.run_cmd(f"pkg64c info {alloc}-{version}").exited == 0)
+            assert(self.run_cmd(f"{pkg} info {alloc}-{version}").exited == 0)
 
     def run_cmd(self, cmd, env = {}, check = False):
         with open(os.devnull, 'w') as devnull_fd:
@@ -265,6 +317,9 @@ class ExecEnvironment:
 
     def set_work_dir(self, path):
         self.work_dir = path
+
+    def get_work_dir(self, mode):
+        return os.path.join(self.work_dir, mode)
 
 class BenchExecutor:
     def __init__(self, cmd):
@@ -292,11 +347,23 @@ def prepare_cheri():
     if args.no_build_cheri:
         assert(args.local_dir)
         assert(os.path.exists(args.local_dir))
+        return
+    log_message(f"Building new CHERI components in {work_dir_local}")
+    targets = ["morello-llvm-native", "cheribsd-morello-purecap"]
+    if not args.no_run_benchmarks:
+        targets.append("cheribsd-morello-hybrid")
+    cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild {' '.join(targets)}")
+    subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
+    return
+
+def prepare_qemu():
+    if args.no_build_cheri:
+        assert(args.local_dir)
+        assert(os.path.exists(args.local_dir))
     else:
         log_message(f"Building new QEMU instance in {work_dir_local}")
-        cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild qemu disk-image-morello-purecap")
-        subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
-        cmd = make_cheribuild_cmd("cheribsd-morello-hybrid")
+        cmd = make_cheribuild_cmd(" ". join(["qemu", "disk-image-morello-purecap"]))
+        # cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild qemu disk-image-morello-purecap")
         subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
     artifact_path = os.path.join(work_dir_local, "cheribuild")
     assert(os.path.exists(os.path.join(artifact_path, "output", "sdk", "bin", "qemu-system-morello")))
@@ -382,40 +449,6 @@ def prepare_benchs(bench_sources, machine):
 # Application
 ################################################################################
 
-def do_source(alloca):
-    if alloca.install_mode == InstallMode.CHERIBUILD:
-        os.chdir(get_config('cheribuild_folder'))
-        subprocess.run(make_cheribuild_cmd(alloca.install_target, "--configure-only"), stdout = None)
-        repo = git.Repo(path = subprocess.check_output(shlex.split("git rev-parse --show-toplevel"), cwd = alloca.source_path, encoding = 'UTF-8').strip())
-        repo.git.fetch("origin", alloca.version)
-        repo.git.checkout(alloca.version)
-        os.chdir(base_cwd)
-    elif alloca.install_mode == InstallMode.REPO:
-        if not os.path.exists(alloca.source_path):
-            repo = git.Repo.clone_from(url = alloca.install_target, to_path = alloca.source_path)
-        else:
-            repo = git.Repo(alloca.source_path)
-        repo.git.fetch("origin", alloca.version)
-        repo.git.checkout(alloca.version)
-    elif alloca.install_mode == InstallMode.PKG:
-        # TODO
-        pass
-
-def do_install(alloca, compile_env):
-    if alloca.install_mode == InstallMode.CHERIBUILD:
-        os.chdir(get_config('cheribuild_folder'))
-        subprocess.run(make_cheribuild_cmd(alloca.install_target, "-c"), stdout = None)
-        os.chdir(base_cwd)
-        for machine in execution_targets.values():
-            machine.put_file(alloca.lib_file, machine.work_dir)
-    elif alloca.install_mode == InstallMode.REPO:
-        subprocess.run([alloca.get_build_file_path(), work_dir_local], env = compile_env, cwd = alloca.source_path)
-        for machine in execution_targets.values():
-            machine.put_file(alloca.lib_file, machine.work_dir)
-    elif alloca.install_mode == InstallMode.PKG:
-        for machine in execution_targets.values():
-            machine.install_alloc(alloca.install_target, alloca.version)
-
 def do_line_count(source_path):
     cloc_data = json.loads(subprocess.check_output(make_cloc_cmd(source_path), encoding = 'UTF-8'))
     return cloc_data['SUM']['code']
@@ -430,8 +463,7 @@ def do_attacks(alloca, attacks, machine):
     results = {}
     for attack in attacks:
         cmd = os.path.join(machine.work_dir, os.path.basename(attack))
-        remote_env = {}
-        remote_env = { 'LD_PRELOAD' : alloca.get_remote_lib_path(machine) }
+        remote_env = { 'LD_PRELOAD' : alloca.get_remote_lib_path(machine, "purecap") }
         log_message(f"RUN {cmd} WITH ENV {remote_env}")
         start_time = time.perf_counter_ns()
         attack_res = machine.run_cmd(cmd, env = remote_env, check = False)
@@ -455,7 +487,7 @@ def do_benchs(alloca, benchs, machine):
     wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
     executors = [BenchExecutor(x) for x in wrappers]
     iteration_count = 3
-    for mode, environ_var in mode_environs.items():
+    for mode in benchmark_modes:
         results[mode] = {}
         for bench in benchs:
             results[mode][bench] = {}
@@ -464,7 +496,7 @@ def do_benchs(alloca, benchs, machine):
             for pmc_event in pmc_events_names:
                 results[mode][bench][pmc_event] = []
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
-            remote_env = { environ_var : alloca.get_remote_lib_path(machine) }
+            remote_env = { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine) }
             for it in range(iteration_count):
                 it_result = {}
                 for executor in executors:
@@ -674,6 +706,9 @@ if os.path.exists(symlink_name):
     os.remove(symlink_name)
 os.symlink(work_dir_local, symlink_name)
 
+# Build new CHERI infrastructure
+prepare_cheri()
+
 # Build and run new CHERI QEMU instance
 qemu_proc = None
 qemu_env = None
@@ -686,7 +721,7 @@ for targets in execution_targets.copy():
         execution_targets[targets] = ExecEnvironment(vars(args)[f"{targets}_machine"])
     else:
         if not qemu_env:
-            qemu_proc = prepare_cheri()
+            qemu_proc = prepare_qemu()
             if not qemu_proc:
                 log_message("Unable to build or run QEMU instance; exiting...")
                 sys.exit(1)
@@ -699,6 +734,8 @@ for machine in execution_targets.values():
     machine.set_rhome(machine.run_cmd("printf $HOME", check = True).stdout)
     machine.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder', machine)}", check = True)
     machine.work_dir = machine.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder', machine)}/{work_dir_prefix}XXX", check = True).stdout.strip()
+    for mode in benchmark_modes:
+        machine.run_cmd(f"mkdir -p {os.path.join([machine.work_dir, mode])}")
 
 # Prepare attacks and read API data
 if not args.no_run_attacks:
@@ -713,9 +750,7 @@ if not args.no_run_benchmarks:
 # Environment for cross-compiling
 compile_env = {
         "CC": get_config('cheribsd_cc'),
-        "CFLAGS": config['cheribsd_cflags'],
         "CXX": get_config('cheribsd_cxx'),
-        "CXXFLAGS": config['cheribsd_cxxflags'],
         "LD": get_config('cheribsd_ld'),
         "PATH": os.getenv('PATH'),
         }
@@ -731,10 +766,10 @@ for alloc_folder in allocators:
     alloc_data = {"name": alloca.name}
 
     # Get source
-    do_source(alloca)
+    alloca.do_source()
 
     # Install
-    do_install(alloca, compile_env)
+    alloca.do_install(compile_env)
 
     # Attacks and validation
     if not args.no_run_attacks:

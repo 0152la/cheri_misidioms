@@ -1,8 +1,6 @@
 {
     "cheribsd_cc": "$WORK/cheribuild/output/morello-sdk/bin/clang",
-    "cheribsd_cflags": "--config cheribsd-morello-purecap",
     "cheribsd_cxx": "$WORK/cheribuild/output/morello-sdk/bin/clang++",
-    "cheribsd_cxxflags": "--config cheribsd-morello-purecap",
     "cheribsd_ld": "$HOME/cheribuild/output/morello-sdk/bin/clang",
     "cheribuild_folder": "$HOME/cheribuild",
     "cheribsd_ports_url": "https://github.com/CTSRD-CHERI/cheribsd-ports",
