@@ -36,6 +36,7 @@ pmc_events_names = [ 'L1D_CACHE', 'L1I_CACHE', 'L2D_CACHE', 'CPU_CYCLES',
                      'INST_RETIRED', 'MEM_ACCESS', 'BUS_ACCESS',
                      'BUS_ACCESS_RD_CTAG' ]
 
+default_mode = "purecap"
 benchmark_modes = {
         "purecap": {
             "environ" : "LD_PRELOAD",
@@ -222,7 +223,6 @@ class Allocator:
         self.info_folder = os.path.abspath(folder)
         self.install_mode = InstallMode.parse_mode(json_data['install']['mode'])
         self.install_target = json_data['install']['target']
-        self.lib_file = parse_path(json_data['install']['lib_file'])
         if self.install_mode == InstallMode.PKG:
             # self.source_path =
             self.cheribsd_ports_path = json_data['cheribsd_ports_path']
@@ -231,8 +231,6 @@ class Allocator:
             self.source_path = parse_path(json_data['install']['source'])
         elif self.install_mode == InstallMode.REPO:
             self.source_path = os.path.join(base_cwd, self.name)
-        if not os.path.isabs(self.lib_file):
-            self.lib_file = os.path.join(self.source_path, self.lib_file)
         self.version = self.install_mode.parse_version(json_data['install'])
         self.no_attacks = False if not "no_attacks" in json_data else json_data['no_attacks']
         self.no_benchs  = False if not "no_benchs"  in json_data else json_data['no_benchs']
@@ -243,7 +241,20 @@ class Allocator:
         return os.path.join(self.info_folder, self.raw_data['install']['build_file'])
 
     def get_remote_lib_path(self, machine, mode):
-        return os.path.join(machine.get_work_dir(mode), os.path.basename(self.lib_file))
+        return os.path.join(machine.get_work_dir(mode), os.path.basename(self.get_libfile(mode)))
+
+    def get_cheribuild_target(self, mode):
+        return self.install_target[mode]["name"]
+
+    def get_libfile(self, mode):
+        if self.install_mode == InstallMode.CHERIBUILD:
+            lib_file_path = parse_path(self.install_target[mode]["lib_file"])
+            assert(os.path.isabs(lib_file_path))
+        else:
+            lib_file_path = parse_path(self.raw_data['install']['lib_file'])
+            if not os.path.isabs(lib_file_path):
+                lib_file_path = os.path.join(self.source_path, self.lib_file_path)
+        return lib_file_path
 
     def do_source(self):
         if self.install_mode == InstallMode.CHERIBUILD:
@@ -270,21 +281,21 @@ class Allocator:
             pass
 
     def do_install(self, compile_env):
-        to_install = benchmark_modes.keys() if not self.no_benchs else ["purecap"]
+        to_install = benchmark_modes.keys() if not self.no_benchs else [default_mode]
         for mode in to_install:
+            log_message(f"Installing {self.name} Mode {mode}")
             compile_env["CFLAGS"]   = benchmark_modes[mode]["cflags"]
             compile_env["CXXFLAGS"] = benchmark_modes[mode]["cflags"]
             if self.install_mode == InstallMode.CHERIBUILD:
                 os.chdir(get_config('cheribuild_folder'))
-                # TODO modes
-                subprocess.run(make_cheribuild_cmd(self.install_target, "-c"), stdout = None)
+                subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), "-c"), stdout = None)
                 os.chdir(base_cwd)
                 for machine in execution_targets.values():
-                    machine.put_file(self.lib_file, machine.get_work_dir(mode))
+                    machine.put_file(self.get_cheribuild_libfile, machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.REPO:
                 subprocess.run([self.get_build_file_path(), work_dir_local], env = compile_env, cwd = self.source_path)
                 for machine in execution_targets.values():
-                    machine.put_file(self.lib_file, machine.get_work_dir(mode))
+                    machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.PKG:
                 for machine in execution_targets.values():
                     machine.install_alloc(self.install_target, self.version, mode)
