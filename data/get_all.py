@@ -209,7 +209,7 @@ class ExecutorType(enum.Enum):
                     if match:
                         assert parse_key not in result
                         result[parse_key] = float(match.group(1))
-            assert(len(result) == len(to_parse_time))
+            assert(len(result) - 1 == len(to_parse_time))
             return result
         elif self == ExecutorType.PMC:
             if exec_res.exited != 0:
@@ -680,8 +680,9 @@ def do_all_tables(results):
     results = sorted(results, key = itemgetter("name"))
     with open(os.path.join(work_dir_local, "cheri_api.tex"), 'w') as cheri_api_fd:
         cheri_api_fd.write(do_table_cheri_api(results))
-    with open(os.path.join(work_dir_local, "tests.tex"), 'w') as attacks_fd:
-        attacks_fd.write(do_table_attacks(results))
+    if not args.no_run_attacks:
+        with open(os.path.join(work_dir_local, "tests.tex"), 'w') as attacks_fd:
+            attacks_fd.write(do_table_attacks(results))
     with open(os.path.join(work_dir_local, "slocs.tex"), 'w') as slocs_fd:
         slocs_fd.write(do_table_slocs(results))
 
