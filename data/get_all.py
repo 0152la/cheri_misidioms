@@ -200,6 +200,7 @@ class ExecutorType(enum.Enum):
     def parse_output(self, exec_res):
         result = {}
         if self == ExecutorType.TIME:
+            result["returncode"] = exec_res.exited
             if exec_res.exited != 0:
                 return { k : 0.0 for k in to_parse_time.keys() }
             for row in exec_res.stderr.splitlines():
