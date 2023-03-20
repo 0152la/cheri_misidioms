@@ -322,7 +322,7 @@ class ExecEnvironment:
 
     def run_cmd(self, cmd, env = {}, check = False):
         with open(os.devnull, 'w') as devnull_fd:
-            return self.conn.run(cmd, env = env, warn = not check, out_stream = devnull_fd)
+            return self.conn.run(cmd, env = env, warn = not check, hide = 'both')
 
     def put_file(self, src, dest):
         return self.conn.put(src, remote = dest)
