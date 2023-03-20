@@ -79,6 +79,9 @@ arg_parser.add_argument("--bench-machine", action='store', default="",
 arg_parser.add_argument("--table-context", action='store_true',
         help="""If set, will emit Latex tables with prologue and epilogue.
         Otherwise, simply generates the table content""")
+arg_parser.add_argument("--slocs-table-template", action='store', type=str,
+        help="""Path to a file containing a simple template to order allocators
+        in the SLoCs table as desired, `---` indicates a separator line.""")
 for targets in execution_targets:
     arg_parser.add_argument(f"--{targets}-machine", action='store', default="",
             type=str, metavar="address",
@@ -253,7 +256,7 @@ class Allocator:
         else:
             lib_file_path = parse_path(self.raw_data['install']['lib_file'])
             if not os.path.isabs(lib_file_path):
-                lib_file_path = os.path.join(self.source_path, self.lib_file_path)
+                lib_file_path = os.path.join(self.source_path, lib_file_path)
         return lib_file_path
 
     def do_source(self):
@@ -658,6 +661,17 @@ def do_table_slocs(results):
         else:
             entry.extend(['-', '-', '-'])
         entries.append(' & '.join(map(str, entry)))
+    if args.slocs_table_template:
+        ordered_entries = []
+        with open(args.slocs_table_template, 'r') as tmpl:
+            for alloc in tmpl.readlines():
+                if alloc == "---":
+                    ordered_entries.append(r'\midrule')
+                    continue
+                entry = [x for x in entries if x.startswith(alloc)]
+                assert(len(entry) == 1)
+                ordered_entries.extend(entry)
+        entries = ordered_entries
     table = '\n'.join(['\n'.join(preamble), '\\\\\n'.join(entries), '\n'.join(epilogue)])
     return table
 
@@ -746,7 +760,7 @@ for machine in execution_targets.values():
     machine.run_cmd(f"mkdir -p {get_config('cheri_qemu_test_folder', machine)}", check = True)
     machine.work_dir = machine.run_cmd(f"mktemp -d {get_config('cheri_qemu_test_folder', machine)}/{work_dir_prefix}XXX", check = True).stdout.strip()
     for mode in benchmark_modes:
-        machine.run_cmd(f"mkdir -p {os.path.join([machine.work_dir, mode])}")
+        machine.run_cmd(f"mkdir -p {os.path.join(machine.work_dir, mode)}")
 
 # Prepare attacks and read API data
 if not args.no_run_attacks:
