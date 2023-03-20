@@ -733,6 +733,7 @@ os.symlink(work_dir_local, symlink_name)
 
 # Build new CHERI infrastructure
 prepare_cheri()
+api_fns = read_apis(get_config('cheri_api_path'))
 
 # Build and run new CHERI QEMU instance
 qemu_proc = None
@@ -765,7 +766,6 @@ for machine in execution_targets.values():
 # Prepare attacks and read API data
 if not args.no_run_attacks:
     attacks = sorted(prepare_attacks(get_config('attacks_folder'), execution_targets["attacks"]))
-    api_fns = read_apis(get_config('cheri_api_path'))
     cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare benchmarks
