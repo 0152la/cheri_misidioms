@@ -510,7 +510,7 @@ def do_benchs(alloca, benchs, machine):
             for pmc_event in pmc_events_names:
                 results[mode][bench][pmc_event] = []
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
-            remote_env = { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine) }
+            remote_env = { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine, mode) }
             for it in range(iteration_count):
                 it_result = {}
                 for executor in executors:
