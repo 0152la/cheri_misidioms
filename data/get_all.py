@@ -202,7 +202,8 @@ class ExecutorType(enum.Enum):
         if self == ExecutorType.TIME:
             result["returncode"] = exec_res.exited
             if exec_res.exited != 0:
-                return { k : 0.0 for k in to_parse_time.keys() }
+                result.update({ k : 0.0 for k in to_parse_time.keys() })
+                return result
             for row in exec_res.stderr.splitlines():
                 for parse_key, parse_re in to_parse_time.items():
                     match = parse_re.match(row)
