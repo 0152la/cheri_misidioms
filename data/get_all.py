@@ -506,7 +506,7 @@ def do_benchs(alloca, benchs, machine):
     for mode in benchmark_modes:
         results[mode] = {}
         for bench in benchs:
-            results[mode][bench] = {}
+            results[mode][bench] = {"returncode" : []}
             for time_entries in to_parse_time:
                 results[mode][bench][time_entries] = []
             for pmc_event in pmc_events_names:
