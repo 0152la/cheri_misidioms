@@ -367,7 +367,7 @@ def prepare_cheri():
     log_message(f"Building new CHERI components in {work_dir_local}")
     targets = ["morello-llvm-native", "cheribsd-morello-purecap"]
     if not args.no_run_benchmarks:
-        targets.append("cheribsd-morello-hybrid")
+        targets.extend(["cheribsd-morello-hybrid", "--enable-hybrid-targets"])
     cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild {' '.join(targets)}")
     subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
     return
