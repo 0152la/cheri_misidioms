@@ -258,15 +258,17 @@ class Allocator:
 
     def do_source(self):
         if self.install_mode == InstallMode.CHERIBUILD:
+            to_install = benchmark_modes.keys() if not self.no_benchs else [default_mode]
             os.chdir(get_config('cheribuild_folder'))
-            subprocess.run(
-                make_cheribuild_cmd(self.install_target, "--configure-only"),
-                stdout = None)
-            repo = git.Repo(path = subprocess.check_output(
-                shlex.split("git rev-parse --show-toplevel"),
-                cwd = self.source_path, encoding = 'UTF-8').strip())
-            repo.git.fetch("origin", self.version)
-            repo.git.checkout(self.version)
+            for mode in to_install:
+                subprocess.run(
+                    make_cheribuild_cmd(self.get_cheribuild_target(mode), "--configure-only"),
+                    stdout = None)
+                repo = git.Repo(path = subprocess.check_output(
+                    shlex.split("git rev-parse --show-toplevel"),
+                    cwd = self.source_path, encoding = 'UTF-8').strip())
+                repo.git.fetch("origin", self.version)
+                repo.git.checkout(self.version)
             os.chdir(base_cwd)
         elif self.install_mode == InstallMode.REPO:
             if not os.path.exists(self.source_path):
@@ -291,7 +293,7 @@ class Allocator:
                 subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), "-c"), stdout = None)
                 os.chdir(base_cwd)
                 for machine in execution_targets.values():
-                    machine.put_file(self.get_cheribuild_libfile, machine.get_work_dir(mode))
+                    machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.REPO:
                 subprocess.run([self.get_build_file_path(), work_dir_local], env = compile_env, cwd = self.source_path)
                 for machine in execution_targets.values():
@@ -788,8 +790,11 @@ for alloc_folder in allocators:
         alloca = Allocator(alloc_folder, json.load(alloc_info_json))
     alloc_data = {"name": alloca.name}
 
-    # Get source
+    # Get source for default mode (NOTE currently "purecap")
     alloca.do_source()
+
+    # SLoCs, CHERI API calls count
+    alloc_data.update(get_source_data(alloca))
 
     # Install
     alloca.do_install(compile_env)
@@ -801,9 +806,6 @@ for alloc_folder in allocators:
     # Benchmarks
     if not args.no_run_benchmarks:
         alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
-
-    # SLoCs, CHERI API calls count
-    alloc_data.update(get_source_data(alloca))
 
     # Version info
     alloc_data['version'] = alloca.version
