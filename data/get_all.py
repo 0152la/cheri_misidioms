@@ -15,6 +15,7 @@ import enum
 
 from operator import itemgetter
 
+import numpy as np
 from fabric import Connection
 
 ################################################################################
@@ -157,6 +158,12 @@ def log_message(msg):
     print(msg)
     log_fd.write(msg + '\n')
 
+def prep_data(results, event, empty = False, func = None):
+    results[f"raw-{event}"] = results[event]
+    if not empty:
+        results[event] = func(results[event])
+    return results
+
 ################################################################################
 # Objects
 ################################################################################
@@ -184,8 +191,8 @@ class InstallMode(enum.Enum):
             assert(False)
 
 to_parse_time = {
-    "total_time_ms" : re.compile(r'user (\d+\.\d+)'),
-    "rss_kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
+    "total-time" : re.compile(r'user (\d+\.\d+)'),
+    "rss-kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
     }
 
 class ExecutorType(enum.Enum):
@@ -319,8 +326,7 @@ class ExecEnvironment:
             assert(self.run_cmd(f"{pkg} info {alloc}-{version}").exited == 0)
 
     def run_cmd(self, cmd, env = {}, check = False):
-        with open(os.devnull, 'w') as devnull_fd:
-            return self.conn.run(cmd, env = env, warn = not check, hide = 'both')
+        return self.conn.run(cmd, env = env, warn = not check, hide = 'both')
 
     def put_file(self, src, dest):
         return self.conn.put(src, remote = dest)
@@ -499,6 +505,8 @@ def do_benchs(alloca, benchs, machine):
     pmc_events = [ f"-p {event}" for event in pmc_events_names ]
     wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
     executors = [BenchExecutor(x) for x in wrappers]
+    do_mean = lambda x: np.mean(x)
+    do_geomean = lambda x: np.exp(x)
     iteration_count = 3
     for mode in benchmark_modes:
         results[mode] = {}
@@ -516,6 +524,19 @@ def do_benchs(alloca, benchs, machine):
                     log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
                     it_result.update(executor.do_exec(bench_cmd, remote_env, machine))
                 results[mode][bench] = {k : v + [it_result[k]] for k,v in results[mode][bench].items()}
+            if 0 in results[mode][bench]["returncode"]:
+                for event in to_parse_time:
+                    results[mode][bench] = prep_data(results[mode][bench], event, False, do_mean)
+                for event in pmc_events_names:
+                    results[mode][bench] = prep_data(results[mode][bench], event, False, do_geomean)
+            else:
+                for event in to_parse_time + pmc_events_names:
+                    results[mode][bench] = prep_data(results[mode][bench], event, True)
+    for mode in benchmark_modes:
+        for bench in results[mode]:
+            for event in to_parse_time + pmc_events_names:
+                if results["hybrid"][bench][event] > 0.0:
+                    results[mode][bench][f"normalised-{event}"] = results[mode][bench][event] / results["hybrid"][bench][event]
     return results
 
 def get_source_data(alloca):
