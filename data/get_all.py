@@ -95,14 +95,9 @@ args = arg_parser.parse_args()
 # Helper Functions
 ################################################################################
 
-def make_cmake_config_cmd(source, build, toolchain):
-    return shlex.split(
-        """cmake -S {source} -B {build} -DCMAKE_BUILD_TYPE=Release
-        -DCMAKE_INSTALL_PREFIX={build}/install -Dgclib=jemalloc
-        -Dbm_logfile=out.json -DCMAKE_TOOLCHAIN_FILE={toolchain}""")
-
 def make_cheribuild_cmd(target, flags = ""):
     cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {work_dir_local}/cheribuild {flags} {target}')
+    print(cmd)
     return cmd
 
 def make_grep_pattern_cmd(pattern, target):
@@ -590,8 +585,8 @@ def do_table_cheri_api(results):
     return table
 
 def do_table_attacks_parse_result(result, attack):
-    if result["results"][attack]["exit_code"] == 0:
-        result_stdout = result["results"][attack]["stdout"]
+    if result["results_attacks"][attack]["exit_code"] == 0:
+        result_stdout = result["results_attacks"][attack]["stdout"]
         if "Attack unsuccessful" in result_stdout:
             return r'$\checkmark$'
         elif "Attack successful" in result_stdout:
@@ -630,7 +625,7 @@ def do_table_attacks(results):
         epilogue += [r'\label{tab:atks}', r'\end{center}', r'\end{table}']
     entries = []
     for result in results:
-        if not result['results'] or not result['validated']:
+        if not result['results_attacks'] or not result['validated']:
             continue
         entry = [result['name']]
         entry.extend(do_table_attacks_entries(result, attack_names))
@@ -801,11 +796,11 @@ for alloc_folder in allocators:
 
     # Attacks and validation
     if not args.no_run_attacks:
-        alloc_data['results'], alloc_data['validated'] = do_attacks(alloca, attacks, execution_targets["attacks"])
+        alloc_data['results_attacks'], alloc_data['validated'] = do_attacks(alloca, attacks, execution_targets["attacks"])
 
     # Benchmarks
     if not args.no_run_benchmarks:
-        alloc_data['results'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
+        alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
 
     # SLoCs, CHERI API calls count
     alloc_data.update(get_source_data(alloca))
