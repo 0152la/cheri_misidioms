@@ -56,6 +56,8 @@ benchmark_modes = {
             },
         }
 
+benchmarks_graph_folder = "benchs_graphs"
+
 ################################################################################
 # Arguments
 ################################################################################
@@ -167,6 +169,8 @@ def prep_data(results, event, empty = False, func = None):
     results[f"raw-{event}"] = results[event]
     if not empty:
         results[event] = func(results[event])
+    else:
+        results[event] = 0.0
     return results
 
 ################################################################################
@@ -797,6 +801,7 @@ if not args.no_run_attacks:
 # Prepare benchmarks
 if not args.no_run_benchmarks:
     benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]))
+    os.mkdir(os.path.join(work_dir_local, benchmarks_graph_folder))
 
 # Environment for cross-compiling
 compile_env = {
@@ -835,9 +840,10 @@ for alloc_folder in allocators:
         tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
         with open(tmp_results_path, 'w') as benchs_tmp_fd:
             json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
+        os.mkdir(os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name))
         graphplot.plot("histogram", \
                        tmp_results_path,
-                       os.path.join(work_dir_local, f"{alloca.name}.pdf"),
+                       os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
                        ([*to_parse_time.keys(), *pmc_events_names], []),
                        True, conf_interval = 98)
 
