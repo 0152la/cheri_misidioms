@@ -1,22 +1,27 @@
 #!/usr/bin/env python3
 
 import argparse
-import git
+import enum
+import glob
 import json
 import os
-import glob
-import subprocess
-import shlex
 import re
+import shlex
+import subprocess
+import sys
 import tempfile
 import time
-import sys
-import enum
 
 from operator import itemgetter
 
+# External dependencies
+import git
 import numpy as np
+
 from fabric import Connection
+
+# Local dependencies
+import graphplot
 
 ################################################################################
 # Constants
@@ -827,6 +832,14 @@ for alloc_folder in allocators:
     # Benchmarks
     if not args.no_run_benchmarks:
         alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
+        tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
+        with open(tmp_results_path, 'w') as benchs_tmp_fd:
+            json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
+        graphplot.plot("histogram", \
+                       tmp_results_path,
+                       os.path.join(work_dir_local, f"{alloca.name}.pdf"),
+                       [*to_parse_time.keys(), *pmc_events_names], True,
+                       conf_interval = 98)
 
     # Version info
     alloc_data['version'] = alloca.version
