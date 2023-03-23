@@ -506,7 +506,7 @@ def do_benchs(alloca, benchs, machine):
     wrappers.append(f"pmcstat -d -w {pmc_timeout} {' '.join(pmc_events)}")
     executors = [BenchExecutor(x) for x in wrappers]
     do_mean = lambda x: np.mean(x)
-    do_geomean = lambda x: np.exp(x)
+    do_geomean = lambda x: np.exp(np.log(x).mean())
     iteration_count = 3
     for mode in benchmark_modes:
         results[mode] = {}
@@ -530,11 +530,11 @@ def do_benchs(alloca, benchs, machine):
                 for event in pmc_events_names:
                     results[mode][bench] = prep_data(results[mode][bench], event, False, do_geomean)
             else:
-                for event in to_parse_time + pmc_events_names:
+                for event in [*to_parse_time.keys(), *pmc_events_names]:
                     results[mode][bench] = prep_data(results[mode][bench], event, True)
     for mode in benchmark_modes:
         for bench in results[mode]:
-            for event in to_parse_time + pmc_events_names:
+            for event in [*to_parse_time.keys(), *pmc_events_names]:
                 if results["hybrid"][bench][event] > 0.0:
                     results[mode][bench][f"normalised-{event}"] = results[mode][bench][event] / results["hybrid"][bench][event]
     return results
