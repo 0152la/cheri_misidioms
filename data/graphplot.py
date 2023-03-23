@@ -160,6 +160,7 @@ def gen_barchart(data, separate, strip_zero, conf_interval):
 
 def plot(plot_type, json_file, out_file, events_set, separate_files, conf_interval=95):
   json_file = pathlib.Path(json_file)  # Ensure conversion to pathlib
+  out_file = pathlib.Path(out_file)
   assert plot_type == f"histogram", f"Only histograms are currently supported"
   result_data = None
   with open(json_file, "r") as fd:

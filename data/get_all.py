@@ -838,8 +838,8 @@ for alloc_folder in allocators:
         graphplot.plot("histogram", \
                        tmp_results_path,
                        os.path.join(work_dir_local, f"{alloca.name}.pdf"),
-                       [*to_parse_time.keys(), *pmc_events_names], True,
-                       conf_interval = 98)
+                       ([*to_parse_time.keys(), *pmc_events_names], []),
+                       True, conf_interval = 98)
 
     # Version info
     alloc_data['version'] = alloca.version
