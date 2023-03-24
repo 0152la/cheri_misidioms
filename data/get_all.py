@@ -801,7 +801,7 @@ if not args.no_run_attacks:
 # Prepare benchmarks
 if not args.no_run_benchmarks:
     benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]))
-    os.mkdir(os.path.join(work_dir_local, benchmarks_graph_folder))
+    os.makedirs(os.path.join(work_dir_local, benchmarks_graph_folder), exist_ok = True)
 
 # Environment for cross-compiling
 compile_env = {
