@@ -14,7 +14,7 @@
             "hybrid":
             {
                 "name": "cheribsd-morello-hybrid",
-                "lib_file": "$WORK/cheribuild/output/rootfs-morello-hybrid/usr/lib/libmalloc_simple.so.1"
+                "lib_file": "$WORK/cheribuild/output/rootfs-morello-hybrid/usr/lib64c/libmalloc_simple.so.1"
             }
         }
     },
