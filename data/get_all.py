@@ -263,7 +263,7 @@ class Allocator:
         return self.install_target[mode]["name"]
 
     def get_libfile(self, mode):
-        if self.install_mode == InstallMode.CHERIBUILD:
+        if self.install_mode in [InstallMode.CHERIBUILD, InstallMode.PKG]:
             lib_file_path = parse_path(self.install_target[mode]["lib_file"])
             assert(os.path.isabs(lib_file_path))
         else:
