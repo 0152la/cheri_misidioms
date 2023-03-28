@@ -6,6 +6,7 @@ import glob
 import json
 import os
 import re
+import pathlib
 import shlex
 import subprocess
 import sys
@@ -849,6 +850,11 @@ for alloc_folder in allocators:
                        os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
                        ([*to_parse_time.keys(), *pmc_events_names], []),
                        True, conf_interval = 98)
+        pdfs = map(str,
+                   pathlib.Path(os.path.join(
+                       work_dir_local, benchmarks_graph_folder, alloca.name))
+                   .glob("*.pdf"))
+        subprocess.check_call(f"qpdf --empty --pages {' '.join(pdfs)} -- out-full-{alloca.names}.pdf")
 
     # Version info
     alloc_data['version'] = alloca.version
