@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.15.0)
-project(cheri-bdwgc 
+project(cheri-bdwgc
         VERSION 0.1
         DESCRIPTION "mimalloc benchmarks"
         LANGUAGES CXX C)
@@ -16,12 +16,12 @@ endif()
 #endif()
 
 if (${gclib} STREQUAL bdwgc)
-    set(bdwgc_cmake_args 
+    set(bdwgc_cmake_args
         -DCMAKE_INSTALL_PREFIX=${CMAKE_CURRENT_BINARY_DIR}/bdwgc
-        -Denable_gcj_support=OFF 
-        -Denable_parallel_mark=OFF 
-        -Denable_threads=OFF 
-        -Denable_dynamic_loading=OFF 
+        -Denable_gcj_support=OFF
+        -Denable_parallel_mark=OFF
+        -Denable_threads=OFF
+        -Denable_dynamic_loading=OFF
         -DCMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})
     set(bdwgc_build_prefix ${CMAKE_CURRENT_BINARY_DIR}/bdwgc)
 
@@ -60,7 +60,7 @@ if (${gclib} STREQUAL bdwgc)
       # These libraries are built using ExternalPorject. install(TARGETS) does not work
       #file(GLOB gclibraries FOLLOW_SYMLINKS ${bdwgc_build_prefix}/lib/lib*)
       set(gclibraries libgc.a libcord.a)
-    else() 
+    else()
       add_library(gc SHARED IMPORTED)
       set_target_properties(gc PROPERTIES IMPORTED_LOCATION ${install_dir}/lib/libgc.so)
       add_dependencies(gc project_bdwgc)
@@ -71,34 +71,40 @@ if (${gclib} STREQUAL bdwgc)
 
       # These libraries are built using ExternalPorject. install(TARGETS) does not work
       #file(GLOB gclibraries FOLLOW_SYMLINKS ${bdwgc_build_prefix}/lib/lib*)
-      set(gclibraries 
+      set(gclibraries
               libgc.so.1.5.1 libgc.so.1 libgc.so
               libcord.so.1.5.0 libcord.so.1 libcord.so)
-    endif() 
+    endif()
 
     list(TRANSFORM gclibraries PREPEND ${bdwgc_build_prefix}/lib/)
-    install(FILES 
+    install(FILES
         ${gclibraries}
         DESTINATION lib
         PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
-elseif(${gclib} STREQUAL cheribumpalloc)
-    add_subdirectory(cheri_bump_alloc) 
+elseif (${gclib} STREQUAL cheribumpalloc)
+    add_subdirectory(cheri_bump_alloc)
+elseif (${gclib} STREQUAL static)
+    if(NOT DEFINED staticlib)
+        message(FATAL_ERROR "Not given a static library path!")
+    elseif(NOT EXISTS staticlib)
+        message(FATAL_ERROR "Static path ${staticlib} does not exist!")
+    endif()
 endif()
 
 # Each individual test has own subdir
-add_subdirectory(barnes) 
-add_subdirectory(binary_tree) 
-add_subdirectory(cfrac) 
-add_subdirectory(espresso) 
-add_subdirectory(richards) 
-# add_subdirectory(simple_alloc) 
+add_subdirectory(barnes)
+add_subdirectory(binary_tree)
+add_subdirectory(cfrac)
+add_subdirectory(espresso)
+add_subdirectory(richards)
+# add_subdirectory(simple_alloc)
 if ( NOT ${gclib} STREQUAL bdwgc)
-    add_subdirectory(glibc-bench) 
-    add_subdirectory(mstress) 
-    # add_subdirectory(rptest) 
-    # add_subdirectory(xmalloc) 
+    add_subdirectory(glibc-bench)
+    add_subdirectory(mstress)
+    # add_subdirectory(rptest)
+    # add_subdirectory(xmalloc)
 endif()
 
 # Check out this
-# [link](https://www.jwlawson.co.uk/interest/2020/02/23/cmake-external-project.html) 
+# [link](https://www.jwlawson.co.uk/interest/2020/02/23/cmake-external-project.html)
 # for embedding the external libgc and installation

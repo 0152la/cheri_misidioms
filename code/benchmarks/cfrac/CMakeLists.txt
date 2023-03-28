@@ -15,21 +15,22 @@ if (DEFINED bm_logfile)
     list(APPEND cfrac_sources ${CMAKE_SOURCE_DIR}/misc/harness.c)
 endif()
 
-
 add_executable(cfrac.elf ${cfrac_sources})
 
+target_link_libraries(cfrac.elf PRIVATE m)
 if (${gclib} STREQUAL bdwgc)
         include_directories(AFTER ${install_dir}/include)
-	target_link_libraries(cfrac.elf PRIVATE m gc)
+	target_link_libraries(cfrac.elf PRIVATE gc)
         add_compile_definitions(BWGC BDWGC IGNOREFREE)
 elseif (${gclib} STREQUAL cheribumpalloc)
     add_compile_definitions(BUMPALLOC)
     include_directories(AFTER ${CMAKE_SOURCE_DIR}/cheri_bump_alloc)
-    target_link_libraries(cfrac.elf PRIVATE m cheribumpalloc)
-else()
-        target_link_libraries(cfrac.elf m)
+    target_link_libraries(cfrac.elf PRIVATE cheribumpalloc)
+elseif (${gclib} STREQUAL static)
+    target_link_libraries(cfrac.elf PRIVATE ${staticlib})
+    target_link_options(cfrac.elf PRIVATE -no-pie -static)
 endif()
 
-install(TARGETS cfrac.elf 
+install(TARGETS cfrac.elf
 	RUNTIME DESTINATION bin)
 

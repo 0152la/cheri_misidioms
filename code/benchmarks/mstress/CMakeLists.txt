@@ -10,19 +10,20 @@ endif()
 
 add_executable(mstress.elf ${mstress_sources})
 
-
+target_link_libraries(mstress.elf PRIVATE pthread)
 if (${gclib} STREQUAL bdwgc)
     include_directories(AFTER ${install_dir}/include)
-    target_link_libraries(mstress.elf PRIVATE pthread gc)
+    target_link_libraries(mstress.elf PRIVATE gc)
     add_compile_definitions(BDWGC IGNOREFREE)
 elseif (${gclib} STREQUAL cheribumpalloc)
     add_compile_definitions(BUMPALLOC)
     include_directories(AFTER ${CMAKE_SOURCE_DIR}/cheri_bump_alloc)
-    target_link_libraries(mstress.elf PRIVATE pthread cheribumpalloc)
-else()
-    target_link_libraries(mstress.elf PRIVATE pthread)
+    target_link_libraries(mstress.elf PRIVATE cheribumpalloc)
+elseif (${gclib} STREQUAL static)
+    target_link_libraries(mstress.elf PRIVATE ${staticlib})
+    target_link_options(mstress.elf PRIVATE -no-pie -static)
 endif()
 
-install(TARGETS mstress.elf 
+install(TARGETS mstress.elf
         RUNTIME DESTINATION bin)
 
