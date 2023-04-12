@@ -309,7 +309,7 @@ class Allocator:
                 os.chdir(get_config('cheribuild_folder'))
                 flags = "-c"
                 if mode == "hybrid":
-                    flags = " ".join(flags, "--enable-hybrid-targets")
+                    flags = " ".join([flags, "--enable-hybrid-targets"])
                 subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), flags), stdout = None)
                 os.chdir(base_cwd)
                 for machine in execution_targets.values():
@@ -364,8 +364,8 @@ class BenchExecutor:
             sys.exit(1)
         self.cmd = cmd
 
-    def do_exec(self, target, environ, machine):
-        cmd = f"cd {machine.work_dir} ; {self.cmd} {target}"
+    def do_exec(self, target, mode, environ, machine):
+        cmd = f"cd {machine.get_work_dir(mode)} ; {self.cmd} {target}"
         log_message(f" - {cmd}")
         exec_res = machine.run_cmd(cmd, env = environ, check = False)
         return self.type.parse_output(exec_res)
@@ -461,19 +461,19 @@ def prepare_benchs(bench_sources, machine):
     -Dgclib=jemalloc -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     benchs = []
-    for toolchain_type in ["purecap"]:
-        dest = os.path.join(work_dir_local, f"benchs-{toolchain_type}")
+    for mode in ["purecap", "hybrid"]:
+        dest = os.path.join(work_dir_local, f"benchs-{mode}")
         subprocess.check_call(shlex.split(
             cmake_config_cmd.format(source = bench_sources, dest = dest,
                 sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
-                toolchain = os.path.join(bench_sources, f"morello-{toolchain_type}.cmake"))))
+                toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))))
         subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
         subprocess.check_call(shlex.split(f"cmake --install {os.path.join(dest, 'build')}"))
         for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
                     benchs.append(filn)
-                machine.put_file(os.path.join(dir_path, filn), machine.work_dir)
+                machine.put_file(os.path.join(dir_path, filn), machine.get_work_dir(mode))
     return benchs
 
 ################################################################################
@@ -534,7 +534,7 @@ def do_benchs(alloca, benchs, machine):
                 it_result = {}
                 for executor in executors:
                     log_message(f"== RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
-                    it_result.update(executor.do_exec(bench_cmd, remote_env, machine))
+                    it_result.update(executor.do_exec(bench_cmd, mode, remote_env, machine))
                 results[mode][bench] = {k : v + [it_result[k]] for k,v in results[mode][bench].items()}
             if 0 in results[mode][bench]["returncode"]:
                 for event in to_parse_time:
