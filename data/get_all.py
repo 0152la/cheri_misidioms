@@ -201,7 +201,7 @@ class InstallMode(enum.Enum):
             assert(False)
 
 to_parse_time = {
-    "total-time" : re.compile(r'user (\d+\.\d+)'),
+    "total-time" : re.compile(r'real (\d+\.\d+)'),
     "rss-kb" : re.compile(r'\s*(\d+)  maximum resident set size'),
     }
 
@@ -374,7 +374,6 @@ class BenchExecutor:
 # Preparation
 ################################################################################
 
-# TODO split
 def prepare_cheri():
     if args.no_build_cheri:
         assert(args.local_dir)
