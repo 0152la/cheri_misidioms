@@ -6,7 +6,6 @@ import glob
 import json
 import os
 import re
-import pathlib
 import shlex
 import subprocess
 import sys
