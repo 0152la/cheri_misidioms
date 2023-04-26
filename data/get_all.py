@@ -10,6 +10,7 @@ import pathlib
 import shlex
 import subprocess
 import sys
+import shutil
 import tempfile
 import time
 
@@ -320,7 +321,7 @@ class Allocator:
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.PKG:
                 for machine in execution_targets.values():
-                    machine.install_alloc(self.install_target, self.version, mode)
+                    machine.install_alloc(self.install_target[mode]["name"], self.version, mode)
 
 class ExecEnvironment:
     def __init__(self, addr):
@@ -549,6 +550,8 @@ def do_benchs(alloca, benchs, machine):
             for event in [*to_parse_time.keys(), *pmc_events_names]:
                 if results["hybrid"][bench][event] > 0.0:
                     results[mode][bench][f"normalised-{event}"] = results[mode][bench][event] / results["hybrid"][bench][event]
+                else:
+                    results[mode][bench][f"normalised-{event}"] = 0.0
     return results
 
 def get_source_data(alloca):
@@ -843,17 +846,20 @@ for alloc_folder in allocators:
         tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
         with open(tmp_results_path, 'w') as benchs_tmp_fd:
             json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
-        os.mkdir(os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name))
+        graphs_folder = os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name)
+        if os.path.exists(graphs_folder):
+            shutil.rmtree(graphs_folder)
+        os.mkdir(graphs_folder)
         graphplot.plot("histogram", \
                        tmp_results_path,
                        os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
                        ([*to_parse_time.keys(), *pmc_events_names], []),
                        True, conf_interval = 98)
-        pdfs = map(str,
-                   pathlib.Path(os.path.join(
-                       work_dir_local, benchmarks_graph_folder, alloca.name))
-                   .glob("*.pdf"))
-        subprocess.check_call(f"qpdf --empty --pages {' '.join(pdfs)} -- out-full-{alloca.names}.pdf")
+        #pdfs = map(str,
+        #           pathlib.Path(os.path.join(
+        #               work_dir_local, benchmarks_graph_folder, alloca.name))
+        #           .glob("*.pdf"))
+        #subprocess.check_call(f"qpdf --empty --pages {' '.join(pdfs)} -- out-full-{alloca.name}.pdf")
 
     # Version info
     alloc_data['version'] = alloca.version
