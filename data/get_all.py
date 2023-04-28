@@ -105,7 +105,7 @@ args = arg_parser.parse_args()
 ################################################################################
 
 def make_cheribuild_cmd(target, source, flags = ""):
-    cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {work_dir_local}/cheribuild {flags} {target}')
+    cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {source} {flags} {target}')
     print(cmd)
     return cmd
 
