@@ -310,7 +310,7 @@ class Allocator:
             compile_env["CXXFLAGS"] = benchmark_modes[mode]["cflags"]
             if self.install_mode == InstallMode.CHERIBUILD:
                 os.chdir(get_config('cheribuild_folder'))
-                flags = "-c"
+                flags = ""
                 if mode == "hybrid":
                     flags = " ".join([flags, "--enable-hybrid-targets"])
                 subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = flags), stdout = None)
