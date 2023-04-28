@@ -3,7 +3,7 @@
     {
         "mode": "cheribuild",
         "commit": "cc4e4c0553bb375d14f3c2e2513c20404fc2a748",
-        "source": "$WORK/cheribuild/cheribsd/contrib/jemalloc",
+        "source": "./cheribsd/contrib/jemalloc",
         "target": {
             "purecap":
             {

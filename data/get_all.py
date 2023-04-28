@@ -104,7 +104,7 @@ args = arg_parser.parse_args()
 # Helper Functions
 ################################################################################
 
-def make_cheribuild_cmd(target, flags = ""):
+def make_cheribuild_cmd(target, source, flags = ""):
     cmd = shlex.split(f'./cheribuild.py -d -f --skip-update --source-root {work_dir_local}/cheribuild {flags} {target}')
     print(cmd)
     return cmd
@@ -245,9 +245,11 @@ class Allocator:
             self.cheribsd_ports_path = json_data['cheribsd_ports_path']
             self.cheribsd_ports_commit = json_data['commit']
         elif self.install_mode == InstallMode.CHERIBUILD:
-            self.source_path = parse_path(json_data['install']['source'])
+            # self.source_path = parse_path(json_data['install']['source'])
+            self.build_path = os.path.join(work_dir_local, self.name)
+            self.source_path = os.path.join(work_dir_local, self.name, json_data['install']['source'])
         elif self.install_mode == InstallMode.REPO:
-            self.source_path = os.path.join(base_cwd, self.name)
+            self.source_path = os.path.join(work_dir_local, self.name)
         self.version = self.install_mode.parse_version(json_data['install'])
         self.no_attacks = False if not "no_attacks" in json_data else json_data['no_attacks']
         self.no_benchs  = False if not "no_benchs"  in json_data else json_data['no_benchs']
@@ -276,10 +278,11 @@ class Allocator:
     def do_source(self):
         if self.install_mode == InstallMode.CHERIBUILD:
             to_install = benchmark_modes.keys() if not self.no_benchs else [default_mode]
+            os.makedirs(self.build_path, exist_ok = True)
             os.chdir(get_config('cheribuild_folder'))
             for mode in to_install:
                 subprocess.run(
-                    make_cheribuild_cmd(self.get_cheribuild_target(mode), "--configure-only"),
+                    make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = "--configure-only"),
                     stdout = None)
                 repo = git.Repo(path = subprocess.check_output(
                     shlex.split("git rev-parse --show-toplevel"),
@@ -310,7 +313,7 @@ class Allocator:
                 flags = "-c"
                 if mode == "hybrid":
                     flags = " ".join([flags, "--enable-hybrid-targets"])
-                subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), flags), stdout = None)
+                subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = flags), stdout = None)
                 os.chdir(base_cwd)
                 for machine in execution_targets.values():
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
@@ -393,7 +396,7 @@ def prepare_qemu():
         assert(os.path.exists(args.local_dir))
     else:
         log_message(f"Building new QEMU instance in {work_dir_local}")
-        cmd = make_cheribuild_cmd(" ". join(["qemu", "disk-image-morello-purecap"]))
+        cmd = make_cheribuild_cmd(" ". join(["qemu", "disk-image-morello-purecap"]), source = f"{work_dir_local}/cheribuild")
         # cmd = shlex.split(f"./cheribuild.py -d -f --source-root {work_dir_local}/cheribuild qemu disk-image-morello-purecap")
         subprocess.check_call(cmd, cwd = get_config('cheribuild_folder'))
     artifact_path = os.path.join(work_dir_local, "cheribuild")
