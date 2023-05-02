@@ -272,7 +272,7 @@ class Allocator:
             lib_file_path = os.path.join(self.build_path, self.install_target[mode]["lib_file"])
         elif self.install_mode == InstallMode.REPO:
             lib_file_path = parse_path(self.raw_data['install']['lib_file'])
-            lib_file_path = f"-{mode}".join(lib_file_path.rsplit(".so", 1))
+            lib_file_path = f"-{mode}.so".join(lib_file_path.rsplit(".so", 1))
             if not os.path.isabs(lib_file_path):
                 lib_file_path = os.path.join(self.source_path, lib_file_path)
         else:
@@ -331,6 +331,7 @@ class Allocator:
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.REPO:
                 subprocess.run([self.get_build_file_path(), work_dir_local], env = compile_env, cwd = self.source_path)
+                assert(os.path.exists(self.get_raw_libfile()))
                 shutil.move(self.get_raw_libfile(), self.get_libfile(mode))
                 for machine in execution_targets.values():
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
