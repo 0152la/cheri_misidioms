@@ -225,7 +225,7 @@ class ExecutorType(enum.Enum):
             assert(len(result) - 1 == len(to_parse_time))
             return result
         elif self == ExecutorType.PMC:
-            if exec_res.exited != 0:
+            if exec_res.exited != 0: # or not r"p/" in output.splitlines()[0]:
                 return { k : 0 for k in pmc_events_names }
             output = exec_res.stderr
             counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
@@ -272,12 +272,20 @@ class Allocator:
             lib_file_path = os.path.join(self.build_path, self.install_target[mode]["lib_file"])
         elif self.install_mode == InstallMode.REPO:
             lib_file_path = parse_path(self.raw_data['install']['lib_file'])
+            lib_file_path = f"-{mode}".join(lib_file_path.rsplit(".so", 1))
             if not os.path.isabs(lib_file_path):
                 lib_file_path = os.path.join(self.source_path, lib_file_path)
         else:
             assert(False)
         assert(os.path.isabs(lib_file_path))
         return lib_file_path
+
+    def get_raw_libfile(self):
+        assert(self.install_mode == InstallMode.REPO)
+        raw_lib_path = self.raw_data['install']['lib_file']
+        if not os.path.isabs(raw_lib_path):
+            raw_lib_path = os.path.join(self.source_path, raw_lib_path)
+        return raw_lib_path
 
     def do_source(self):
         if self.install_mode == InstallMode.CHERIBUILD:
@@ -323,6 +331,7 @@ class Allocator:
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.REPO:
                 subprocess.run([self.get_build_file_path(), work_dir_local], env = compile_env, cwd = self.source_path)
+                shutil.move(self.get_raw_libfile(), self.get_libfile(mode))
                 for machine in execution_targets.values():
                     machine.put_file(self.get_libfile(mode), machine.get_work_dir(mode))
             elif self.install_mode == InstallMode.PKG:
