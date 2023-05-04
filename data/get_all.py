@@ -212,27 +212,33 @@ class ExecutorType(enum.Enum):
     def parse_output(self, exec_res):
         result = {}
         if self == ExecutorType.TIME:
-            result["returncode"] = exec_res.exited
             if exec_res.exited != 0:
-                result.update({ k : 0.0 for k in to_parse_time.keys() })
-                return result
-            for row in exec_res.stderr.splitlines():
-                for parse_key, parse_re in to_parse_time.items():
-                    match = parse_re.match(row)
-                    if match:
-                        assert parse_key not in result
-                        result[parse_key] = float(match.group(1))
-            assert(len(result) - 1 == len(to_parse_time))
-            return result
+                result = { k : 0.0 for k in to_parse_time.keys() }
+            else:
+                for row in exec_res.stderr.splitlines():
+                    for parse_key, parse_re in to_parse_time.items():
+                        match = parse_re.match(row)
+                        if match:
+                            assert parse_key not in result
+                            result[parse_key] = float(match.group(1))
+                assert(len(result) == len(to_parse_time))
         elif self == ExecutorType.PMC:
             if exec_res.exited != 0: # or not r"p/" in output.splitlines()[0]:
-                return { k : 0 for k in pmc_events_names }
-            output = exec_res.stderr
-            counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
-            values = map(int, output.splitlines()[1].split())
-            return dict(zip(counters, values, strict = True))
+                result = { k : 0 for k in pmc_events_names }
+            else:
+                output = exec_res.stderr
+                counters = list(map(str.strip, output.splitlines()[0].split("p/")))[1:]
+                values = map(int, output.splitlines()[1].split())
+                try:
+                    result = dict(zip(counters, values, strict = True))
+                except ValueError:
+                    result = { k : 0 for k in pmc_events_names }
         else:
             assert False
+        result["returncode"] = exec_res.exited
+        result["stdout"] = exec_res.stdout
+        result["stderr"] = exec_res.stderr
+        return result
 
 class Allocator:
     def __init__(self, folder, json_data):
@@ -806,6 +812,7 @@ for targets in execution_targets.copy():
             qemu_env = ExecEnvironment("root@localhost:10086")
         execution_targets[targets] = qemu_env
 assert(execution_targets)
+cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare remote work directories
 for machine in execution_targets.values():
@@ -818,7 +825,6 @@ for machine in execution_targets.values():
 # Prepare attacks and read API data
 if not args.no_run_attacks:
     attacks = sorted(prepare_attacks(get_config('attacks_folder'), execution_targets["attacks"]))
-    cheribsd_ports_repo = prepare_cheribsd_ports()
 
 # Prepare benchmarks
 if not args.no_run_benchmarks:
