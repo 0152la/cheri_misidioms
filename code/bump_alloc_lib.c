@@ -22,7 +22,11 @@ void *malloc(size_t size) {
   if (heap == NULL && !malloc_init())
     return NULL;
 
+#ifdef __CHERI_PURE_CAPABILITY__
   char *new_ptr = __builtin_align_up(
+#else
+  char *__capability new_ptr = __builtin_align_up(
+#endif
     heap,
     -cheri_representable_alignment_mask(size));
   size_t alloc_size =
