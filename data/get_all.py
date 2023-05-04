@@ -222,6 +222,9 @@ class ExecutorType(enum.Enum):
                             assert parse_key not in result
                             result[parse_key] = float(match.group(1))
                 assert(len(result) == len(to_parse_time))
+            result["returncode"] = exec_res.exited
+            result["stdout"] = exec_res.stdout
+            result["stderr"] = exec_res.stderr
         elif self == ExecutorType.PMC:
             if exec_res.exited != 0: # or not r"p/" in output.splitlines()[0]:
                 result = { k : 0 for k in pmc_events_names }
@@ -233,11 +236,11 @@ class ExecutorType(enum.Enum):
                     result = dict(zip(counters, values, strict = True))
                 except ValueError:
                     result = { k : 0 for k in pmc_events_names }
+            result["pmc-returncode"] = exec_res.exited
+            result["pmc-stdout"] = exec_res.stdout
+            result["pmc-stderr"] = exec_res.stderr
         else:
             assert False
-        result["returncode"] = exec_res.exited
-        result["stdout"] = exec_res.stdout
-        result["stderr"] = exec_res.stderr
         return result
 
 class Allocator:
@@ -546,11 +549,13 @@ def do_benchs(alloca, benchs, machine):
     for mode in benchmark_modes:
         results[mode] = {}
         for bench in benchs:
-            results[mode][bench] = {"returncode" : []}
+            results[mode][bench] = {}
             for time_entries in to_parse_time:
                 results[mode][bench][time_entries] = []
             for pmc_event in pmc_events_names:
                 results[mode][bench][pmc_event] = []
+            for extras in ["stdout", "stderr", "returncode", "pmc-stdout", "pmc-stderr", "pmc-returncode"]:
+                results[mode][bench][extras] = []
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
             remote_env = { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine, mode) }
             for it in range(iteration_count):
