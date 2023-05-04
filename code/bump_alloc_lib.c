@@ -18,7 +18,11 @@ void *malloc_init() {
 void free(void *ptr) { }
 
 #ifdef CHERI_AWARE
+#ifdef __CHERI_PURE_CAPABILITY__
 void *malloc(size_t size) {
+#else
+void *__capability malloc(size_t size) {
+#endif
   if (heap == NULL && !malloc_init())
     return NULL;
 
