@@ -303,7 +303,7 @@ class Allocator:
             os.chdir(get_config('cheribuild_folder'))
             for mode in to_install:
                 subprocess.run(
-                    make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = "--only-dependencies"),
+                    make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = ""),
                     stdout = None)
                 repo = git.Repo(path = subprocess.check_output(
                     shlex.split("git rev-parse --show-toplevel"),
@@ -331,7 +331,7 @@ class Allocator:
             compile_env["CXXFLAGS"] = benchmark_modes[mode]["cflags"]
             if self.install_mode == InstallMode.CHERIBUILD:
                 os.chdir(get_config('cheribuild_folder'))
-                flags = ""
+                flags = "-c"
                 if mode == "hybrid":
                     flags = " ".join([flags, "--enable-hybrid-targets"])
                 subprocess.run(make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = flags), stdout = None)
