@@ -303,7 +303,7 @@ class Allocator:
             os.chdir(get_config('cheribuild_folder'))
             for mode in to_install:
                 subprocess.run(
-                    make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = "--configure-only"),
+                    make_cheribuild_cmd(self.get_cheribuild_target(mode), source = self.build_path, flags = "--only-dependencies"),
                     stdout = None)
                 repo = git.Repo(path = subprocess.check_output(
                     shlex.split("git rev-parse --show-toplevel"),
