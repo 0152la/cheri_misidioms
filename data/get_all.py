@@ -870,23 +870,24 @@ for alloc_folder in allocators:
     # Benchmarks
     if not args.no_run_benchmarks:
         alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
-        tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
-        with open(tmp_results_path, 'w') as benchs_tmp_fd:
-            json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
-        graphs_folder = os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name)
-        if os.path.exists(graphs_folder):
-            shutil.rmtree(graphs_folder)
-        os.mkdir(graphs_folder)
-        graphplot.plot("histogram", \
-                       tmp_results_path,
-                       os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
-                       ([*to_parse_time.keys(), *pmc_events_names], []),
-                       True, conf_interval = 98)
-        #pdfs = map(str,
-        #           pathlib.Path(os.path.join(
-        #               work_dir_local, benchmarks_graph_folder, alloca.name))
-        #           .glob("*.pdf"))
-        #subprocess.check_call(f"qpdf --empty --pages {' '.join(pdfs)} -- out-full-{alloca.name}.pdf")
+        if not alloca.no_benchs:
+            tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
+            with open(tmp_results_path, 'w') as benchs_tmp_fd:
+                json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
+            graphs_folder = os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name)
+            if os.path.exists(graphs_folder):
+                shutil.rmtree(graphs_folder)
+            os.mkdir(graphs_folder)
+            graphplot.plot("histogram", \
+                           tmp_results_path,
+                           os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
+                           ([*to_parse_time.keys(), *pmc_events_names], []),
+                           True, conf_interval = 98)
+            #pdfs = map(str,
+            #           pathlib.Path(os.path.join(
+            #               work_dir_local, benchmarks_graph_folder, alloca.name))
+            #           .glob("*.pdf"))
+            #subprocess.check_call(f"qpdf --empty --pages {' '.join(pdfs)} -- out-full-{alloca.name}.pdf")
 
     # Version info
     alloc_data['version'] = alloca.version

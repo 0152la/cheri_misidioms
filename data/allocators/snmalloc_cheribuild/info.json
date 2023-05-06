@@ -8,12 +8,12 @@
             "purecap":
             {
                 "name": "snmalloc-morello-purecap",
-                "lib_file": "$WORK/cheribuild/build/snmalloc-morello-purecap-build/libsnmallocshim.so"
+                "lib_file": "./build/snmalloc-morello-purecap-build/libsnmallocshim.so"
             },
             "hybrid":
             {
                 "name": "snmalloc-aarch64",
-                "lib_file": "$WORK/cheribuild/build/snmalloc-aarch64-build/libsnmallocshim.so"
+                "lib_file": "./build/snmalloc-aarch64-build/libsnmallocshim.so"
             }
         }
     },
