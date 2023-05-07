@@ -91,6 +91,9 @@ arg_parser.add_argument("--table-context", action='store_true',
 arg_parser.add_argument("--slocs-table-template", action='store', type=str,
         help="""Path to a file containing a simple template to order allocators
         in the SLoCs table as desired, `---` indicates a separator line.""")
+arg_parser.add_argument("--benchs-rep-count", action='store', type=int,
+        default = 3,
+        help="""Number of repetitions for benchmarks""")
 for targets in execution_targets:
     arg_parser.add_argument(f"--{targets}-machine", action='store', default="",
             type=str, metavar="address",
@@ -545,7 +548,7 @@ def do_benchs(alloca, benchs, machine):
     executors = [BenchExecutor(x) for x in wrappers]
     do_mean = lambda x: np.mean(x)
     do_geomean = lambda x: np.exp(np.log(x).mean())
-    iteration_count = 3
+    iteration_count = args.benchs_rep_count
     for mode in benchmark_modes:
         results[mode] = {}
         for bench in benchs:
