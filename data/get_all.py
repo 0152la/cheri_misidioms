@@ -95,6 +95,9 @@ arg_parser.add_argument("--slocs-table-template", action='store', type=str,
 arg_parser.add_argument("--benchs-rep-count", action='store', type=int,
         default = 3,
         help="""Number of repetitions for benchmarks""")
+arg_parser.add_argument("--benchs-static", action='store_true',
+        help="""If set, will also execute benchmarks against a statically
+        linked version of an allocator.""")
 for targets in execution_targets:
     arg_parser.add_argument(f"--{targets}-machine", action='store', default="",
             type=str, metavar="address",
@@ -217,9 +220,10 @@ class ExecutorType(enum.Enum):
     PMC = enum.auto()
 
     def parse_output(self, exec_res):
+        fail_condition = not exec_res or exec_res.exited != 0
         result = {}
         if self == ExecutorType.TIME:
-            if exec_res.exited != 0:
+            if fail_condition:
                 result = { k : 0.0 for k in to_parse_time.keys() }
             else:
                 for row in exec_res.stderr.splitlines():
@@ -233,7 +237,7 @@ class ExecutorType(enum.Enum):
             result["stdout"] = exec_res.stdout
             result["stderr"] = exec_res.stderr
         elif self == ExecutorType.PMC:
-            if exec_res.exited != 0: # or not r"p/" in output.splitlines()[0]:
+            if fail_condition: # or not r"p/" in output.splitlines()[0]:
                 result = { k : 0 for k in pmc_events_names }
             else:
                 output = exec_res.stderr
@@ -296,6 +300,13 @@ class Allocator:
         assert(os.path.isabs(lib_file_path))
         return lib_file_path
 
+    def get_static_libfile(self, mode):
+        assert(self.install_mode == InstallMode.REPO)
+        static_lib_path = self.static_data['install']['lib_file_static']
+        if not os.path.isabs(static_lib_path):
+            static_lib_path = os.path.join(self.source_path, static_lib_path)
+        return static_lib_path
+
     def get_raw_libfile(self):
         assert(self.install_mode == InstallMode.REPO)
         raw_lib_path = self.raw_data['install']['lib_file']
@@ -355,6 +366,12 @@ class Allocator:
                 for machine in execution_targets.values():
                     machine.install_alloc(self.install_target[mode]["name"], self.version, mode)
                     machine.run_cmd(f"cp {self.get_libfile(mode)} {machine.get_work_dir(mode)}")
+
+        def do_install_static(self, compile_env):
+            if self.install_mode == InstallMode.REPO:
+                return
+            else:
+                assert(False)
 
 class ExecEnvironment:
     def __init__(self, addr):
@@ -508,6 +525,30 @@ def prepare_benchs(bench_sources, machine):
                 if filn.endswith(".elf"):
                     benchs.append(filn)
                 machine.put_file(os.path.join(dir_path, filn), machine.get_work_dir(mode))
+    return benchs
+
+def prepare_benchs_static(bench_sources, machine, alloc):
+    assert(os.path.exists(bench_sources))
+    cmake_config_cmd = """cmake -S {source} -B {dest}/build
+    -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
+    -Dgclib={lib} -Dbm_logfile=out.json -DSDK={sdk}
+    -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
+    benchs = []
+    for mode in ["purecap", "hybrid"]:
+        dest = os.path.join(work_dir_local, f"benchs-{mode}-static-{alloc.name}")
+        lib = alloc.get_static_libfile(mode)
+        subprocess.check_call(shlex.split(
+            cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib
+                sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
+                toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))))
+        subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
+        subprocess.check_call(shlex.split(f"cmake --install {os.path.join(dest, 'build')}"))
+        for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
+            for filn in new_bench_files:
+                if filn.endswith(".elf"):
+                    benchs.append(filn)
+                dest_dir = os.path.join(machine.get_work_dir(mode), f"static-{mode}-{alloc.name}")
+                machine.put_file(os.path.join(dir_path, filn), dest_dir)
     return benchs
 
 ################################################################################
@@ -841,6 +882,9 @@ if not args.no_run_attacks:
 
 # Prepare benchmarks
 if not args.no_run_benchmarks:
+    # Only run purecap benchmarks in static mode (TODO at least for now?)
+    if args.benchs_static:
+        del benchmark_modes["hybrid"]
     benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]))
     os.makedirs(os.path.join(work_dir_local, benchmarks_graph_folder), exist_ok = True)
 
@@ -871,26 +915,35 @@ for alloc_folder in allocators:
     # Install
     alloca.do_install(compile_env)
 
+    # Prepare static library is needed
+    if args.benchs_static:
+        alloca.do_install_static(compile_env)
+
     # Attacks and validation
     if not args.no_run_attacks:
         alloc_data['results_attacks'], alloc_data['validated'] = do_attacks(alloca, attacks, execution_targets["attacks"])
 
     # Benchmarks
-    if not args.no_run_benchmarks:
+    if not args.no_run_benchmarks and not alloca.no_benchs:
         alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
-        if not alloca.no_benchs:
+        if args.benchs_static:
+            static_benchs = prepare_benchs_static(bench_sources, execution_targets["benchmarks"], alloca)
+            sys.exit(1)
+            alloc_data['results_benchs'] = do_benchs_static(alloca, static_benchs, execution_targets["benchmarks"])
+        # Only produce graphs if we run both purecap and hybrid benchmarks
+        if {"purecap", "hybrid"} <= set(benchmark_modes):
             tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
             with open(tmp_results_path, 'w') as benchs_tmp_fd:
                 json.dump(alloc_data['results_benchs'], benchs_tmp_fd)
-            graphs_folder = os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name)
-            if os.path.exists(graphs_folder):
-                shutil.rmtree(graphs_folder)
-            os.mkdir(graphs_folder)
-            graphplot.plot("histogram", \
-                           tmp_results_path,
-                           os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
-                           ([*to_parse_time.keys(), *pmc_events_names], []),
-                           True, conf_interval = 98)
+                graphs_folder = os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name)
+                if os.path.exists(graphs_folder):
+                    shutil.rmtree(graphs_folder)
+                os.mkdir(graphs_folder)
+                graphplot.plot("histogram", \
+                               tmp_results_path,
+                               os.path.join(work_dir_local, benchmarks_graph_folder, alloca.name, f"{alloca.name}.pdf"),
+                               ([*to_parse_time.keys(), *pmc_events_names], []),
+                               True, conf_interval = 98)
             #pdfs = map(str,
             #           pathlib.Path(os.path.join(
             #               work_dir_local, benchmarks_graph_folder, alloca.name))
