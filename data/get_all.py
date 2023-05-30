@@ -538,7 +538,7 @@ def prepare_benchs_static(bench_sources, machine, alloc):
         dest = os.path.join(work_dir_local, f"benchs-{mode}-static-{alloc.name}")
         lib = alloc.get_static_libfile(mode)
         subprocess.check_call(shlex.split(
-            cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib
+            cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib,
                 sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
                 toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))))
         subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
@@ -927,9 +927,9 @@ for alloc_folder in allocators:
     if not args.no_run_benchmarks and not alloca.no_benchs:
         alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
         if args.benchs_static:
-            static_benchs = prepare_benchs_static(bench_sources, execution_targets["benchmarks"], alloca)
+            static_benchs = prepare_benchs_static(get_config('benchmarks_folder'), execution_targets["benchmarks"], alloca)
             sys.exit(1)
-            alloc_data['results_benchs'] = do_benchs_static(alloca, static_benchs, execution_targets["benchmarks"])
+            # alloc_data['results_benchs'] = do_benchs_static(alloca, static_benchs, execution_targets["benchmarks"])
         # Only produce graphs if we run both purecap and hybrid benchmarks
         if {"purecap", "hybrid"} <= set(benchmark_modes):
             tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
