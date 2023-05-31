@@ -373,6 +373,20 @@ class Allocator:
         else:
             assert(False)
 
+class Benchmark:
+    def __init__(self, name):
+        self.name = name
+        self.paths = dict.fromkeys(benchmark_modes.keys(), {"remote": None, "local": None})
+
+    def add_path(self, path_type, mode, path):
+        assert(path_type in ["remote", "local"])
+        assert(not self.paths[mode][path_type])
+        self.paths[mode][path_type] = path
+
+    def get_path(self, path_type, mode):
+        assert(self.paths[mode][path_type])
+        return self.paths[mode][path_type]
+
 class ExecEnvironment:
     def __init__(self, addr):
         addr_regex = "(\w+)@([\w\.]+):(\d+)"
@@ -415,8 +429,8 @@ class BenchExecutor:
             sys.exit(1)
         self.cmd = cmd
 
-    def do_exec(self, target, mode, environ, machine):
-        cmd = f"cd {machine.get_work_dir(mode)} ; {self.cmd} {target}"
+    def do_exec(self, target, target_dir, environ, machine):
+        cmd = f"cd {target_dir} ; {self.cmd} {target}"
         log_message(f" - {cmd}")
         exec_res = machine.run_cmd(cmd, env = environ, check = False)
         return self.type.parse_output(exec_res)
@@ -511,7 +525,7 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
     -Dgclib={lib} -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
-    benchs = []
+    benchs =  {}
     for mode in benchmark_modes.keys():
         if static_alloc:
             dest = os.path.join(work_dir_local, f"static-benchs-{mode}-{static_alloc.name}")
@@ -530,9 +544,17 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
         for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
-                    benchs.append(filn)
-                machine.run_cmd(f"mkdir -p {dest_dir}")
+                    benchs[filn] = {mode: {"local_path" : dir_path } }
+                machine.run_cmd(f"mkdir -p {machine_dest_dir}")
                 machine.put_file(os.path.join(dir_path, filn), machine_dest_dir)
+                benchs[filn][mode]["remote_path"] = machine_dest_dir
+    bench_objs = []
+    for bench_name,bench_paths in benchs.items():
+        new_bench = Benchmark(bench_name)
+        for mode,paths in bench_paths.items():
+            new_bench.add_path("local", mode, paths["local_path"])
+            new_bench.add_path("remote", mode, paths["remote_path"])
+        bench_objs.append(new_bench)
     return benchs
 
 def prepare_benchs_static(bench_sources, machine, alloc):
@@ -606,7 +628,8 @@ def do_benchs(alloca, benchs, machine, static = False):
     iteration_count = args.benchs_rep_count
     for mode in benchmark_modes:
         results[mode] = {}
-        for bench in benchs:
+        for bench_obj in benchs:
+            bench = bench_obj.name
             results[mode][bench] = {}
             for time_entries in to_parse_time:
                 results[mode][bench][time_entries] = []
@@ -614,13 +637,13 @@ def do_benchs(alloca, benchs, machine, static = False):
                 results[mode][bench][pmc_event] = []
             for extras in ["stdout", "stderr", "returncode", "pmc-stdout", "pmc-stderr", "pmc-returncode"]:
                 results[mode][bench][extras] = []
-            bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
+            bench_cmd = " ".join(["./" + bench, get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
             remote_env = { } if static else { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine, mode) }
             for it in range(iteration_count):
                 it_result = {}
                 for executor in executors:
                     log_message(f"{get_timestamp()} RUN {bench} ({it + 1} / {iteration_count}) TYPE {executor.type} WITH ENV {remote_env}")
-                    it_result.update(executor.do_exec(bench_cmd, mode, remote_env, machine))
+                    it_result.update(executor.do_exec(bench_cmd, bench_obj.get_path("remote", mode), remote_env, machine))
                 results[mode][bench] = {k : v + [it_result[k]] for k,v in results[mode][bench].items()}
             if 0 in results[mode][bench]["returncode"]:
                 for event in to_parse_time:
