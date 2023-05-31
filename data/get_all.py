@@ -6,6 +6,7 @@ import enum
 import glob
 import json
 import os
+import operator
 import re
 import shlex
 import shutil
@@ -554,7 +555,7 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
             new_bench.add_path("local", mode, paths["local_path"])
             new_bench.add_path("remote", mode, paths["remote_path"])
         bench_objs.append(new_bench)
-    return benchs
+    return bench_objs
 
 def prepare_benchs_static(bench_sources, machine, alloc):
     assert(os.path.exists(bench_sources))
@@ -655,7 +656,7 @@ def do_benchs(alloca, benchs, machine, static = False):
     for mode in benchmark_modes:
         for bench in results[mode]:
             for event in [*to_parse_time.keys(), *pmc_events_names]:
-                if results["hybrid"][bench][event] > 0.0:
+                if {"purecap", "hybrid"} <= set(benchmark_modes) and results["hybrid"][bench][event] > 0.0:
                     results[mode][bench][f"normalised-{event}"] = results[mode][bench][event] / results["hybrid"][bench][event]
                 else:
                     results[mode][bench][f"normalised-{event}"] = 0.0
@@ -916,7 +917,7 @@ if not args.no_run_benchmarks:
     # Only run purecap benchmarks in static mode (TODO at least for now?)
     if args.benchs_static:
         del benchmark_modes["hybrid"]
-    benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]))
+    benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]), key = operator.attrgetter("name"))
     os.makedirs(os.path.join(work_dir_local, benchmarks_graph_folder), exist_ok = True)
 
 # Environment for cross-compiling
