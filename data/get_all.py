@@ -302,7 +302,7 @@ class Allocator:
 
     def get_static_libfile(self, mode):
         assert(self.install_mode == InstallMode.REPO)
-        static_lib_path = self.static_data['install']['lib_file_static']
+        static_lib_path = self.raw_data['install']['lib_file_static']
         if not os.path.isabs(static_lib_path):
             static_lib_path = os.path.join(self.source_path, static_lib_path)
         return static_lib_path
@@ -367,11 +367,11 @@ class Allocator:
                     machine.install_alloc(self.install_target[mode]["name"], self.version, mode)
                     machine.run_cmd(f"cp {self.get_libfile(mode)} {machine.get_work_dir(mode)}")
 
-        def do_install_static(self, compile_env):
-            if self.install_mode == InstallMode.REPO:
-                return
-            else:
-                assert(False)
+    def do_install_static(self, compile_env):
+        if self.install_mode == InstallMode.REPO:
+            return
+        else:
+            assert(False)
 
 class ExecEnvironment:
     def __init__(self, addr):
@@ -505,17 +505,24 @@ def prepare_attacks(attacks_path, machine):
         machine.put_file(attack, machine.work_dir)
     return attacks
 
-def prepare_benchs(bench_sources, machine):
+def prepare_benchs(bench_sources, machine, static_alloc = None):
     assert(os.path.exists(bench_sources))
     cmake_config_cmd = """cmake -S {source} -B {dest}/build
     -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX={dest}/install
-    -Dgclib=jemalloc -Dbm_logfile=out.json -DSDK={sdk}
+    -Dgclib={lib} -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     benchs = []
-    for mode in ["purecap", "hybrid"]:
-        dest = os.path.join(work_dir_local, f"benchs-{mode}")
+    for mode in benchmark_modes.keys():
+        if static_alloc:
+            dest = os.path.join(work_dir_local, f"static-benchs-{mode}-{static_alloc.name}")
+            machine_dest_dir = os.path.join(machine.get_work_dir(mode), f"static-{mode}-{static_alloc.name}")
+            lib = static_alloc.get_static_libfile(mode)
+        else:
+            dest = os.path.join(work_dir_local, f"benchs-{mode}")
+            machine_dest_dir = machine.get_work_dir(mode)
+            lib = "jemalloc"
         subprocess.check_call(shlex.split(
-            cmake_config_cmd.format(source = bench_sources, dest = dest,
+            cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib,
                 sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
                 toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))))
         subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
@@ -524,7 +531,7 @@ def prepare_benchs(bench_sources, machine):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
                     benchs.append(filn)
-                machine.put_file(os.path.join(dir_path, filn), machine.get_work_dir(mode))
+                machine.put_file(os.path.join(dir_path, filn), machine_dest_dir)
     return benchs
 
 def prepare_benchs_static(bench_sources, machine, alloc):
@@ -534,8 +541,8 @@ def prepare_benchs_static(bench_sources, machine, alloc):
     -Dgclib={lib} -Dbm_logfile=out.json -DSDK={sdk}
     -DCMAKE_TOOLCHAIN_FILE={toolchain}"""
     benchs = []
-    for mode in ["purecap", "hybrid"]:
-        dest = os.path.join(work_dir_local, f"benchs-{mode}-static-{alloc.name}")
+    for mode in benchmark_modes.keys():
+        dest = os.path.join(work_dir_local, f"static-benchs-{mode}-{alloc.name}")
         lib = alloc.get_static_libfile(mode)
         subprocess.check_call(shlex.split(
             cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib,
@@ -548,6 +555,7 @@ def prepare_benchs_static(bench_sources, machine, alloc):
                 if filn.endswith(".elf"):
                     benchs.append(filn)
                 dest_dir = os.path.join(machine.get_work_dir(mode), f"static-{mode}-{alloc.name}")
+                machine.run_cmd(f"mkdir {dest_dir}")
                 machine.put_file(os.path.join(dir_path, filn), dest_dir)
     return benchs
 
@@ -583,7 +591,7 @@ def do_attacks(alloca, attacks, machine):
         results[attack]['time'] = runtime
     return results, validated
 
-def do_benchs(alloca, benchs, machine):
+def do_benchs(alloca, benchs, machine, static = False):
     if alloca.no_benchs:
         return {}
     results = {}
@@ -606,7 +614,7 @@ def do_benchs(alloca, benchs, machine):
             for extras in ["stdout", "stderr", "returncode", "pmc-stdout", "pmc-stderr", "pmc-returncode"]:
                 results[mode][bench][extras] = []
             bench_cmd = " ".join(["./" + os.path.basename(bench), get_config("benchmarks_params").get(os.path.splitext(bench)[0], "").strip()])
-            remote_env = { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine, mode) }
+            remote_env = { } if static else { benchmark_modes[mode]["environ"] : alloca.get_remote_lib_path(machine, mode) }
             for it in range(iteration_count):
                 it_result = {}
                 for executor in executors:
@@ -925,11 +933,10 @@ for alloc_folder in allocators:
 
     # Benchmarks
     if not args.no_run_benchmarks and not alloca.no_benchs:
-        alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
+        # alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
         if args.benchs_static:
-            static_benchs = prepare_benchs_static(get_config('benchmarks_folder'), execution_targets["benchmarks"], alloca)
-            sys.exit(1)
-            # alloc_data['results_benchs'] = do_benchs_static(alloca, static_benchs, execution_targets["benchmarks"])
+            static_benchs = prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"], alloca)
+            alloc_data['results_benchs_static'] = do_benchs(alloca, static_benchs, execution_targets["benchmarks"])
         # Only produce graphs if we run both purecap and hybrid benchmarks
         if {"purecap", "hybrid"} <= set(benchmark_modes):
             tmp_results_path = os.path.join(work_dir_local, "benchs_temp.json")
