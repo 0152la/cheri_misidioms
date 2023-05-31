@@ -543,11 +543,10 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
         subprocess.check_call(shlex.split(f"cmake --install {os.path.join(dest, 'build')}"))
         for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
             for filn in new_bench_files:
-                if filn.endswith(".elf"):
-                    benchs[filn] = {mode: {"local_path" : dir_path } }
                 machine.run_cmd(f"mkdir -p {machine_dest_dir}")
                 machine.put_file(os.path.join(dir_path, filn), machine_dest_dir)
-                benchs[filn][mode]["remote_path"] = machine_dest_dir
+                if filn.endswith(".elf"):
+                    benchs[filn] = {mode: {"local_path" : dir_path, "remote_path" : machine_dest_dir } }
     bench_objs = []
     for bench_name,bench_paths in benchs.items():
         new_bench = Benchmark(bench_name)
