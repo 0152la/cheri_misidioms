@@ -531,6 +531,7 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
             for filn in new_bench_files:
                 if filn.endswith(".elf"):
                     benchs.append(filn)
+                machine.run_cmd(f"mkdir -p {dest_dir}")
                 machine.put_file(os.path.join(dir_path, filn), machine_dest_dir)
     return benchs
 
