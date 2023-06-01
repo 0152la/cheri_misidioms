@@ -532,7 +532,8 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
         if static_alloc:
             dest = os.path.join(work_dir_local, f"static-benchs-{mode}-{static_alloc.name}")
             machine_dest_dir = os.path.join(machine.get_work_dir(mode), f"static-{mode}-{static_alloc.name}")
-            lib = static_alloc.get_static_libfile(mode)
+            lib = "static"
+            cmake_config_cmd = f"{cmake_config_cmd} -Dstaticlib={static_alloc.get_static_libfile(mode)}"
         else:
             dest = os.path.join(work_dir_local, f"benchs-{mode}")
             machine_dest_dir = machine.get_work_dir(mode)
