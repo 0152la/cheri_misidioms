@@ -959,7 +959,7 @@ for alloc_folder in allocators:
 
     # Benchmarks
     if not args.no_run_benchmarks and not alloca.no_benchs:
-        # alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
+        alloc_data['results_benchs'] = do_benchs(alloca, benchs, execution_targets["benchmarks"])
         if args.benchs_static:
             static_benchs = prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"], alloca)
             alloc_data['results_benchs_static'] = do_benchs(alloca, static_benchs, execution_targets["benchmarks"])
