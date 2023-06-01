@@ -7,6 +7,7 @@ import glob
 import json
 import os
 import operator
+import pprint
 import re
 import shlex
 import shutil
@@ -984,10 +985,10 @@ for alloc_folder in allocators:
     # Version info
     alloc_data['version'] = alloca.version
 
-    print(alloc_data)
+    pprint.pprint(alloc_data, width = shutil.get_terminal_size().columns)
     results.append(alloc_data)
     with open(os.path.join(work_dir_local, "results_tmp.json"), 'w') as results_file:
-        json.dump(results, results_file)
+        json.dump(results, results_file, indent = 4)
     log_message(f"=== DONE {alloc_folder}")
 
 # Terminate QEMU instance
