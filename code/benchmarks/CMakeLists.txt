@@ -89,6 +89,8 @@ elseif (${gclib} STREQUAL static)
     elseif(NOT EXISTS staticlib)
         message(FATAL_ERROR "Static path ${staticlib} does not exist!")
     endif()
+else()
+    message(FATAL_ERROR "Unrecognized lib type ${gclib}!")
 endif()
 
 # Each individual test has own subdir
