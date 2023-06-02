@@ -370,7 +370,7 @@ class Allocator:
                     machine.run_cmd(f"cp {self.get_libfile(mode)} {machine.get_work_dir(mode)}")
 
     def do_install_static(self, compile_env):
-        if self.install_mode == InstallMode.REPO:
+        if self.install_mode in [InstallMode.REPO, InstallMode.CHERIBUILD]:
             return
         else:
             assert(False)
