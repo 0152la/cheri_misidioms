@@ -6,9 +6,8 @@
         "commit": "0a5eb403adf85b3e04ad90e6b44e0cb1de99ba38",
         "lib_file": "./build/libsnmallocshim.so",
         "lib_file_static": "./build/libsnmallocshim-static.a",
+        "static_ld_flags": "-Wl,--defsym=malloc=sn_malloc -Wl,--defsym=calloc=sn_calloc -Wl,--defsym=realloc=sn_realloc -Wl,--defsym=free=sn_free",
         "build_file": "build.sh"
     },
     "date": "2022-11-21"
 }
-
-
