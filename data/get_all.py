@@ -308,9 +308,9 @@ class Allocator:
             if not os.path.isabs(static_lib_path):
                 static_lib_path = os.path.join(self.source_path, static_lib_path)
         elif self.install_mode == InstallMode.CHERIBUILD:
-            static_lib_path = self.raw_data['install'][mode]['lib_file_static']
+            static_lib_path = self.raw_data['install']['target'][mode]['lib_file_static']
             if not os.path.isabs(static_lib_path):
-                static_lib_path = os.path.join(self.source_path, static_lib_path)
+                static_lib_path = os.path.join(self.build_path, static_lib_path)
         else:
             assert(False)
         return static_lib_path
