@@ -4,20 +4,11 @@ import json
 import sys
 import pprint
 
-# From https://stackoverflow.com/a/45846841
-def human_format(num):
-    num = float('{:.3g}'.format(num))
-    magnitude = 0
-    while abs(num) >= 1000:
-        magnitude += 1
-        num /= 1000.0
-    return '{}{}'.format('{:f}'.format(num).rstrip('0').rstrip('.'), ['', 'K', 'M', 'B', 'T'][magnitude])
-
 def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
     static  = data["results_benchs_static"][mode][bench][key]
     margin  = static * 100.00 / dynamic
-    return { "dynamic" : human_format(dynamic), "static" : human_format(static), "margin" : margin }
+    return { "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin }
 
 assert(len(sys.argv) == 2)
 with open(sys.argv[1], 'r') as data_json_fd:
