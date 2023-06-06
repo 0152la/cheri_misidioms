@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 
-import collections
 import json
 import pprint
 import shutil
@@ -10,7 +9,7 @@ def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
     static  = data["results_benchs_static"][mode][bench][key]
     margin  = 100.00 - static * 100.00 / dynamic
-    return collections.OrderedDict({ "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin })
+    return { "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin }
 
 assert(len(sys.argv) == 2)
 with open(sys.argv[1], 'r') as data_json_fd:
@@ -31,4 +30,4 @@ for mode, mode_data in data["results_benchs"].items():
             parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
             parsed[mode][bench]["pmc_instr_retired"] = get_both(data, bench, "INST_RETIRED")
 
-pprint.pprint(parsed, width = shutil.get_terminal_size().columns)
+pprint.pprint(parsed, width = shutil.get_terminal_size().columns, sort_dicts = False)
