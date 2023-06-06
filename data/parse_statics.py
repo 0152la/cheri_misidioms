@@ -7,8 +7,8 @@ import pprint
 def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
     static  = data["results_benchs_static"][mode][bench][key]
-    margin  = static * 100.00 / dynamic
-    return { "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin }
+    margin  = 100.00 - static * 100.00 / dynamic
+    return dict.OrderedDict({ "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin })
 
 assert(len(sys.argv) == 2)
 with open(sys.argv[1], 'r') as data_json_fd:
