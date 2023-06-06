@@ -2,8 +2,9 @@
 
 import collections
 import json
-import sys
 import pprint
+import shutil
+import sys
 
 def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
@@ -30,4 +31,4 @@ for mode, mode_data in data["results_benchs"].items():
             parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
             parsed[mode][bench]["pmc_instr_retired"] = get_both(data, bench, "INST_RETIRED")
 
-pprint.pprint(parsed, width = get_terminal_size().columns)
+pprint.pprint(parsed, width = shutil.get_terminal_size().columns)
