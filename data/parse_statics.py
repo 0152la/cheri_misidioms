@@ -26,7 +26,7 @@ for mode, mode_data in data["results_benchs"].items():
         time_improvement = sta_time * 100.00 / dyn_time
         if all([sta_time, dyn_time]) and time_improvement < 100 - margin:
             parsed[mode][bench] = {}
-            parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : time_improvement}
+            parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : 100.00 - time_improvement}
             parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
             parsed[mode][bench]["pmc_instr_retired"] = get_both(data, bench, "INST_RETIRED")
 
