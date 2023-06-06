@@ -546,10 +546,11 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
             dest = os.path.join(work_dir_local, f"benchs-{mode}")
             machine_dest_dir = machine.get_work_dir(mode)
             lib = "jemalloc"
-        subprocess.check_call(shlex.split(
-            cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib,
-                sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
-                toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))))
+        cmake_config_cmd.format(source = bench_sources, dest = dest, lib = lib,
+            sdk = os.path.join(work_dir_local, "cheribuild", "output", "morello-sdk"),
+            toolchain = os.path.join(bench_sources, f"morello-{mode}.cmake"))
+        log_message(f"Preparing benchmarks (alloca {static_alloc}) -- {cmake_config_cmd}")
+        subprocess.check_call(shlex.split(cmake_config_cmd))
         subprocess.check_call(shlex.split(f"cmake --build {os.path.join(dest, 'build')}"))
         subprocess.check_call(shlex.split(f"cmake --install {os.path.join(dest, 'build')}"))
         for dir_path, _, new_bench_files in os.walk(os.path.join(dest, "install")):
