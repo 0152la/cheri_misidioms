@@ -23,7 +23,7 @@ for mode, mode_data in data["results_benchs"].items():
         sta_time = data["results_benchs_static"][mode][bench]["total-time"]
 
         time_improvement = sta_time * 100.00 / dyn_time < 100
-        if  time_improvement < 100 - margin:
+        if all([sta_time, dyn_time]) and time_improvement < 100 - margin:
             parsed[mode][bench] = {}
             parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : time_improvement}
             parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
