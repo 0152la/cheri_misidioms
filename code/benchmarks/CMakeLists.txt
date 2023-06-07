@@ -5,6 +5,14 @@ project(cheri-bdwgc
         LANGUAGES CXX C)
 set(CMAKE_CXX_STANDARD 14)
 
+function(setup_static target)
+    target_link_libraries(${target} PRIVATE ${staticlib})
+    target_link_options(${target} PRIVATE -no-pie -static)
+    if (DEFINED static_flags)
+        target_link_options(${target} PRIVATE ${static_flags})
+    endif()
+endfunction()
+
 if (NOT CMAKE_BUILD_TYPE)
         message(STATUS "No build type selected, default to *** Release with Debug Info ***")
         set(CMAKE_BUILD_TYPE "Debug")
