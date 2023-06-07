@@ -540,8 +540,8 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
             machine_dest_dir = os.path.join(machine.get_work_dir(mode), f"static-{mode}-{static_alloc.name}")
             lib = "static"
             cmake_config_cmd = f"{cmake_config_cmd} -Dstaticlib={static_alloc.get_static_libfile(mode)}"
-            if "static_ld_flags" in static_alloc.raw_data["install"]:
-                cmake_config_cmd = f"{cmake_config_cmd} -Dstatic_flags='{static_alloc.raw_data['install']['static_ld_flags']}'"
+            if "static_flags" in static_alloc.raw_data["install"]:
+                cmake_config_cmd = f"{cmake_config_cmd} -Dstatic_flags='{static_alloc.raw_data['install']['static_flags']}'"
         else:
             dest = os.path.join(work_dir_local, f"benchs-{mode}")
             machine_dest_dir = machine.get_work_dir(mode)
