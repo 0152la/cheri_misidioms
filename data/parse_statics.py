@@ -4,7 +4,6 @@ import argparse
 import json
 import pprint
 import shutil
-import sys
 
 arg_parser = argparse.ArgumentParser()
 arg_parser.add_argument("input", type=str, action='store',
@@ -24,6 +23,13 @@ with open(args.input, 'r') as data_json_fd:
     data = json.load(data_json_fd)[0]
 
 parsed = {}
+datas = {
+        "rss-kb"            : "rss-kb",
+        "pmc_cpu_cycles"    : "CPU_CYCLES",
+        "pmc_instr_retired" : "INST_RETIRED",
+        "pmc_l1d_cache"     : "L1D_CACHE",
+        "pmc_l1i_cache"     : "L1I_CACHE",
+        }
 for mode, mode_data in data["results_benchs"].items():
     parsed[mode] = {}
     for bench in mode_data.keys():
@@ -34,7 +40,7 @@ for mode, mode_data in data["results_benchs"].items():
         if all([sta_time, dyn_time]) and abs(margin) >= args.margin:
             parsed[mode][bench] = {}
             parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : margin}
-            parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
-            parsed[mode][bench]["pmc_instr_retired"] = get_both(data, bench, "INST_RETIRED")
+            for label, metric in datas.items():
+                parsed[mode][bench][label] = get_both(data, bench, metric)
 
 pprint.pprint(parsed, width = shutil.get_terminal_size().columns, sort_dicts = False)
