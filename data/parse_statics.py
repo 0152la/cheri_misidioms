@@ -1,9 +1,17 @@
 #!/usr/bin/env python3
 
+import argparse
 import json
 import pprint
 import shutil
 import sys
+
+arg_parser = argparse.ArgumentParser()
+arg_parser.add_argument("input", type=str, action='store', required = True,
+    help="""Path to input json file containing `get_all` output""")
+arg_parser.add_argument("--margin", type=float, action='store', default=7.00,
+    help="""The difference in runtime percent for which to print out
+         benchmarks. A value of 0.0 means always print.""")
 
 def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
@@ -24,7 +32,7 @@ for mode, mode_data in data["results_benchs"].items():
         sta_time = data["results_benchs_static"][mode][bench]["total-time"]
 
         time_improvement = sta_time * 100.00 / dyn_time
-        if all([sta_time, dyn_time]) and time_improvement < 100 - margin:
+        if all([sta_time, dyn_time]) and abs(time_improvement) <= 100 - margin:
             parsed[mode][bench] = {}
             parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : 100.00 - time_improvement}
             parsed[mode][bench]["pmc_cpu_cycles"] = get_both(data, bench, "CPU_CYCLES")
