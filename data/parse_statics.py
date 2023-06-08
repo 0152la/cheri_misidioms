@@ -35,12 +35,15 @@ for mode, mode_data in data["results_benchs"].items():
     for bench in mode_data.keys():
         dyn_time = data["results_benchs"][mode][bench]["total-time"]
         sta_time = data["results_benchs_static"][mode][bench]["total-time"]
+        if not all([sta_time, dyn_time]):
+            continue
 
         margin = 100.00 - sta_time * 100.00 / dyn_time
-        if all([sta_time, dyn_time]) and abs(margin) >= args.margin:
+        if abs(margin) >= args.margin:
             parsed[mode][bench] = {}
             parsed[mode][bench]["time"] = {"dynamic" : dyn_time, "static" : sta_time, "margin" : margin}
             for label, metric in datas.items():
                 parsed[mode][bench][label] = get_both(data, bench, metric)
+    parsed[mode] = sorted(parsed[mode].items(), key = lambda x : x[1]["time"]["margin"], reverse = True)
 
 pprint.pprint(parsed, width = shutil.get_terminal_size().columns, sort_dicts = False)
