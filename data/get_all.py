@@ -97,7 +97,8 @@ arg_parser.add_argument("--slocs-table-template", action='store', type=str,
 arg_parser.add_argument("--benchs-rep-count", action='store', type=int,
         default = 3,
         help="""Number of repetitions for benchmarks""")
-arg_parser.add_argument("--benchs-static", action='store_true',
+arg_parser.add_argument("--benchs-static", action='store',
+        choices=["all", "purecap", "hybrid"], default=None,
         help="""If set, will also execute benchmarks against a statically
         linked version of an allocator.""")
 for targets in execution_targets:
@@ -903,7 +904,8 @@ if not args.no_run_attacks:
 if not args.no_run_benchmarks:
     # Only run purecap benchmarks in static mode (TODO at least for now?)
     if args.benchs_static:
-        del benchmark_modes["hybrid"]
+        if not args.benchs_static == "all":
+            benchmark_modes = { args.benchs_static : benchmark_modes[args.benchs_static }
     benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]), key = operator.attrgetter("name"))
     os.makedirs(os.path.join(work_dir_local, benchmarks_graph_folder), exist_ok = True)
 
