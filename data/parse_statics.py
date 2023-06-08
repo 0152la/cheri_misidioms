@@ -16,7 +16,7 @@ args = arg_parser.parse_args()
 def get_both(data, bench, key):
     dynamic = data["results_benchs"][mode][bench][key]
     static  = data["results_benchs_static"][mode][bench][key]
-    margin  = 100.00 - static * 100.00 / dynamic
+    margin  = "N/A" if not all([dynamic, static]) else 100.00 - static * 100.00 / dynamic
     return { "dynamic" : f'{dynamic:,}', "static" : f'{static:,}', "margin" : margin }
 
 with open(args.input, 'r') as data_json_fd:
