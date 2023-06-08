@@ -905,7 +905,7 @@ if not args.no_run_benchmarks:
     # Only run purecap benchmarks in static mode (TODO at least for now?)
     if args.benchs_static:
         if not args.benchs_static == "all":
-            benchmark_modes = { args.benchs_static : benchmark_modes[args.benchs_static }
+            benchmark_modes = { args.benchs_static : benchmark_modes[args.benchs_static] }
     benchs = sorted(prepare_benchs(get_config('benchmarks_folder'), execution_targets["benchmarks"]), key = operator.attrgetter("name"))
     os.makedirs(os.path.join(work_dir_local, benchmarks_graph_folder), exist_ok = True)
 
