@@ -101,6 +101,9 @@ arg_parser.add_argument("--benchs-static", action='store',
         choices=["all", "purecap", "hybrid"], default=None,
         help="""If set, will also execute benchmarks against a statically
         linked version of an allocator.""")
+arg_parser.add_argument("--benchs-static-lto", action='store_true',
+        help="""If set, will compile benchmarks with LTO (link-time
+        optimisation) enabled.""")
 for targets in execution_targets:
     arg_parser.add_argument(f"--{targets}-machine", action='store', default="",
             type=str, metavar="address",
@@ -543,6 +546,8 @@ def prepare_benchs(bench_sources, machine, static_alloc = None):
             cmake_config_cmd = f"{cmake_config_cmd} -Dstaticlib={static_alloc.get_static_libfile(mode)}"
             if "static_flags" in static_alloc.raw_data["install"]:
                 cmake_config_cmd = f"{cmake_config_cmd} -Dstatic_flags='{static_alloc.raw_data['install']['static_flags']}'"
+            if args.benchs_static_lto:
+                cmake_config_cmd = f"{cmake_config_cmd} -Dstatic_lto=TRUE"
         else:
             dest = os.path.join(work_dir_local, f"benchs-{mode}")
             machine_dest_dir = machine.get_work_dir(mode)
